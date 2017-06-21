@@ -1,0 +1,3 @@
+I wonder if this should return an exception when the quoting is
+invalid rather than just returning it as is as I think most of the
+other functions in Git.pm do that with invalid input.
