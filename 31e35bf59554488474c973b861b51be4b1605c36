@@ -1,0 +1,8 @@
+changes since v3:
+ - interpret commit.cleanup=scissors to mean COMMIT_MSG_CLEANUP_SPACE
+   to match 'git commit'
+
+changes since v1:
+ - renamed git_revert_config() to common_config()
+ - prefixed cleanup_mode constants to reflect the changes to patch 2
+   in this series
