@@ -3,3 +3,5 @@ changes since v1:
  - removed unnecessary NULL tests before calling free()
  - style cleanups
  - corrected commit message
+ - prefixed cleanup_mode constants to reflect the changes to patch 2
+   in this series
