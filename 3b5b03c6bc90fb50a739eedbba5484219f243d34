@@ -1,0 +1,4 @@
+changes since v1:
+ - renamed git_revert_config() to git_common_config()
+ - prefixed cleanup_mode constants to reflect the changes to patch 2
+   in this series
