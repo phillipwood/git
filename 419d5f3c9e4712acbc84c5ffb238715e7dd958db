@@ -1,0 +1,2 @@
+changes since v1:
+ - rename update_head() to update_head_with_reflog()
