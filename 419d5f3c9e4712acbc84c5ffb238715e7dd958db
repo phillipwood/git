@@ -1,2 +1,2 @@
 changes since v1:
- - rename update_head() to update_head_with_reflog()
+ - prefix cleanup_mode enum and constants with commit_msg_
