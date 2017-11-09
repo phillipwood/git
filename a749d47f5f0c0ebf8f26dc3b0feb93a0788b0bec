@@ -1,0 +1,7 @@
+changes since v1:
+ - added comments to explain return value of try_to_commit()
+ - removed unnecessary NULL tests before calling free()
+ - style cleanups
+ - corrected commit message
+ - prefixed cleanup_mode constants to reflect the changes to patch 2
+   in this series
