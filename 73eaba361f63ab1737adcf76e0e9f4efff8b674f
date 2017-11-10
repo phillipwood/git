@@ -1,0 +1,2 @@
+changes since v1:
+ - convert flags passed to print_commit_summary() to unsigned int
