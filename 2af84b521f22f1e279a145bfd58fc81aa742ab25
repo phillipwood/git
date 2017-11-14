@@ -1,8 +1,6 @@
 changes since v2:
  - updated commit message to reflect the change in function name
-
-changes since v1:
- - rename update_head() to update_head_with_reflog()
+ - style fixes
 
 changes since v1:
  - rename update_head() to update_head_with_reflog()
