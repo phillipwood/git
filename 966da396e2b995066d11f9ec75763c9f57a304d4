@@ -3,3 +3,6 @@ changes since v2:
 
 changes since v1:
  - rename update_head() to update_head_with_reflog()
+
+changes since v1:
+ - rename update_head() to update_head_with_reflog()
