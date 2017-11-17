@@ -2,6 +2,7 @@ changes since v2:
  - expanded commit message to explain why it is ok to die in
    print_commit_summary() and dropped the next patch which made it
    return an error instead.
+ - style fixes.
 
 changes since v1:
  - convert flags passed to print_commit_summary() to unsigned int
