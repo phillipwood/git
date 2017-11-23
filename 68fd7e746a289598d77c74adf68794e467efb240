@@ -1,0 +1,4 @@
+The output of the tests with after the previous patch looks like the
+output of the merge tests, so I'm hopeful that this is a genuine fix,
+but someone who knows about submodules should check that things are in
+fact working properly now.
