@@ -6,8 +6,3 @@ changes since v1:
  - renamed git_revert_config() to common_config()
  - prefixed cleanup_mode constants to reflect the changes to patch 2
    in this series
-
-changes since v1:
- - renamed git_revert_config() to common_config()
- - prefixed cleanup_mode constants to reflect the changes to patch 2
-   in this series
