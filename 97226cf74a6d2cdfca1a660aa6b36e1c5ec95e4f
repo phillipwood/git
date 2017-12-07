@@ -1,0 +1,3 @@
+changes since v4:
+ - move the definition of cleanup mode enum so it can be referenced in
+   struct replay_opts by a later commit
