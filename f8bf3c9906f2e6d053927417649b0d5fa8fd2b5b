@@ -1,0 +1,2 @@
+changes since v4:
+ - changed cleanup and gpg handling to reflect the changes in the last patch
