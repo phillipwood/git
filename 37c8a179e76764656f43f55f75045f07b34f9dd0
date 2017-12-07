@@ -1,0 +1,6 @@
+changes since v1:
+ - prefix cleanup_mode enum and constants with commit_msg_
+
+changes since v4:
+ - move the definition of cleanup mode enum so it can be referenced in
+   struct replay_opts by a later commit
