@@ -1,3 +1,6 @@
+changes since v4:
+ - changed cleanup and gpg handling to reflect the changes in the last patch
+
 changes since v3:
  - take account of change print_commit_summary() return type after
    dropping the patch that made it return an error instead of dying.
@@ -12,6 +15,3 @@ changes since v1:
  - corrected commit message
  - prefixed cleanup_mode constants to reflect the changes to patch 2
    in this series
-
-changes since v4:
- - changed cleanup and gpg handling to reflect the changes in the last patch
