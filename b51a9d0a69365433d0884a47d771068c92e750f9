@@ -1,0 +1,3 @@
+changes since v4:
+ - reworked config handling to setup diff options and store defaults
+   in struct replay_opts rather than using global variables.
