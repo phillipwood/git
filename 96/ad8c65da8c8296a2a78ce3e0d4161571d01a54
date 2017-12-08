@@ -1,6 +1,7 @@
 changes since v4:
- - reworked config handling to setup diff options and store defaults
-   in struct replay_opts rather than using global variables.
+ - reworked config handling to avoid calling git_default_config()
+   unnecessarily and store defaults in struct replay_opts rather than
+   using global variables.
 
 changes since v3:
  - interpret commit.cleanup=scissors to mean COMMIT_MSG_CLEANUP_SPACE
