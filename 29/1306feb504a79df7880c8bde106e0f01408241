@@ -1,0 +1,6 @@
+NB the test for 'rebase -i' breaks when git is compiled with
+GETTEXT_POISON=1. I've bisected it to 18633e1a22 ("rebase -i: use the
+rebase--helper builtin", 2017-2-9) which is neither a huge surprise as
+the shell version does not suffer from this or very helpful as it
+doesn't pinpont where the problem is (presumably something in
+sequencer.c) I've not had time to look into this yet.
