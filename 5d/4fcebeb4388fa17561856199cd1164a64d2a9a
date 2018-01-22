@@ -1,0 +1,2 @@
+Changes since v1
+  - use test_seq for portability (Thanks to Eric Sunshine)
