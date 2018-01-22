@@ -1,0 +1,2 @@
+Changes since v1:
+  - marked run_prepare_commit_msg_hook() as static (Thanks to Ramsey Jones)
