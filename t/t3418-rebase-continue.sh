@@ -11,8 +11,9 @@ set_fake_editor
 test_expect_success 'setup' '
 	test_commit "commit-new-file-F1" F1 1 &&
 	test_commit "commit-new-file-F2" F2 2 &&
-
-	git checkout -b topic HEAD^ &&
+	test_commit F2-A F2 A &&
+	test_commit F2-B F2 B &&
+	git checkout -b topic HEAD^^^ &&
 	test_commit "commit-new-file-F2-on-topic-branch" F2 22 &&
 
 	git checkout master
@@ -43,6 +44,46 @@ test_expect_success 'non-interactive rebase --continue works with touched file' 
 test_expect_success 'rebase --continue can not be used with other options' '
 	test_must_fail git rebase -v --continue &&
 	test_must_fail git rebase --continue -v
+'
+
+test_expect_success 'rebase -i invokes editor after conflict' '
+	git reset --hard &&
+	git checkout F2-B &&
+	test_must_fail env FAKE_LINES=2 git rebase -i commit-new-file-F2 &&
+	echo resolved >F2 &&
+	git add F2 &&
+	FAKE_COMMIT_MESSAGE="edited" git rebase --continue &&
+	echo edited >expected &&
+	git log --pretty=format:%B -1 >actual &&
+	test_cmp expected actual &&
+	test_cmp_rev HEAD^ commit-new-file-F2
+'
+
+test_expect_success 'rebase -i respects rebase.continue.alwaysEdit after conflict' '
+	git reset --hard &&
+	git checkout F2-B &&
+	test_must_fail env FAKE_LINES=2 git rebase -i commit-new-file-F2 &&
+	echo resolved >F2 &&
+	git add F2 &&
+	FAKE_COMMIT_MESSAGE="edited" \
+		git -c rebase.continue.alwaysEdit=false rebase --continue &&
+	git log --pretty=format:%B -1 F2-B >expected &&
+	git log --pretty=format:%B -1 >actual &&
+	test_cmp expected actual &&
+	test_cmp_rev HEAD^ commit-new-file-F2
+'
+
+test_expect_success 'rebase.continue.alwaysEdit=false handles fixups correctly' '
+	git reset --hard &&
+	git checkout F2-B &&
+	test_must_fail env FAKE_LINES="1 squash 3 fixup 2" git rebase -i commit-new-file-F1 &&
+	echo 2 >F2 &&
+	git add F2 &&
+	EXPECT_HEADER_COUNT=3 FAKE_COMMIT_MESSAGE="edited" \
+		git -c rebase.continue.alwaysEdit=false rebase --continue &&
+	git log --pretty=format:%B -1 F2-B >expected &&
+	git log --pretty=format:%B -1 >actual &&
+	test_cmp expected actual
 '
 
 test_expect_success 'rebase --continue remembers merge strategy and options' '

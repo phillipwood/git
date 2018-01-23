@@ -145,6 +145,11 @@ static GIT_PATH_FUNC(rebase_path_squash_onto, "rebase-merge/squash-onto")
 static GIT_PATH_FUNC(rebase_path_refs_to_delete, "rebase-merge/refs-to-delete")
 
 /*
+ * When we stop for conflicts the current commit options are recorded
+ * in this file.
+ */
+static GIT_PATH_FUNC(rebase_path_commit_flags, "rebase-merge/commit-flags");
+/*
  * The following files are written by git-rebase just after parsing the
  * command-line.
  */
@@ -1689,6 +1694,82 @@ static int update_squash_messages(struct repository *r,
 	return res;
 }
 
+static struct {
+	unsigned int flag;
+	const char *name;
+} commit_flags[] = {
+	{ ALLOW_EMPTY, "allow-empty" },
+	{ CLEANUP_MSG, "cleanup" },
+	{ EDIT_MSG,    "edit" },
+	{ VERIFY_MSG,  "verify" }
+};
+
+#define COMMIT_FLAGS_COUNT (ARRAY_SIZE(commit_flags))
+
+static int read_commit_flags(unsigned int *flags)
+{
+	struct strbuf buf = STRBUF_INIT;
+	FILE *f;
+	unsigned int out = 0;
+	int ret = 0;
+
+	f = fopen(rebase_path_commit_flags(), "r");
+	if (!f) {
+		if (errno == ENOENT)
+			return 0;
+		else return error_errno(_("unable to read file '%s'"),
+					rebase_path_commit_flags());
+	}
+	while (strbuf_getline(&buf, f) != EOF) {
+		size_t i;
+		for (i = 0; i < COMMIT_FLAGS_COUNT; i++) {
+			if (!strcmp(buf.buf, commit_flags[i].name)) {
+				out |= commit_flags[i].flag;
+				break;
+			}
+		}
+		if (i == COMMIT_FLAGS_COUNT)
+			ret = error(_("unknown commit flag '%s'"), buf.buf);
+	}
+	if (ferror(f))
+		ret = error_errno(_("unable to read file '%s'"),
+				  rebase_path_commit_flags());
+	fclose(f);
+	strbuf_release(&buf);
+	if (!ret)
+		*flags = out;
+
+	return ret;
+}
+
+static int write_commit_flags(enum todo_command cmd, int flags)
+{
+	struct strbuf buf = STRBUF_INIT;
+	size_t i;
+	int ret = 0;
+
+	/*
+	 * We only write the flags when there are conflicts so we need to
+	 * cleanup the conflict comments when we commit. We also want to run the
+	 * pre-commit and commit-msg hooks to check the conflict resolution
+	 * passes them.
+	 */
+	flags |= CLEANUP_MSG | VERIFY_MSG;
+	if (cmd == TODO_EDIT)
+		flags |= EDIT_MSG;
+	for (i = 0; i < COMMIT_FLAGS_COUNT; i++) {
+		if (flags & commit_flags[i].flag)
+			strbuf_addf(&buf, "%s\n", commit_flags[i].name);
+	}
+	if (write_message(buf.buf, buf.len, rebase_path_commit_flags(), 0))
+		ret = error(_("unable to write '%s'"),
+			    rebase_path_commit_flags());
+
+	strbuf_release(&buf);
+
+	return ret;
+}
+
 static void flush_rewritten_pending(void)
 {
 	struct strbuf buf = STRBUF_INIT;
@@ -1937,6 +2018,12 @@ static int do_pick_commit(struct repository *r,
 	    update_ref(NULL, "REVERT_HEAD", &commit->object.oid, NULL,
 		       REF_NO_DEREF, UPDATE_REFS_MSG_ON_ERR))
 		res = -1;
+	/*
+	 * If the pick failed due to conflicts then save the current head and
+	 * commit options for 'git rebase --continue'
+	 */
+	if (is_rebase_i(opts) && res == 1)
+			write_commit_flags(command, flags);
 
 	if (res) {
 		error(command == TODO_REVERT
@@ -4106,11 +4193,16 @@ static int commit_staged_changes(struct repository *r,
 {
 	unsigned int flags = ALLOW_EMPTY | EDIT_MSG;
 	unsigned int final_fixup = 0, is_clean;
+	int always_edit = 1;
 
 	if (has_unstaged_changes(r, 1))
 		return error(_("cannot rebase: You have unstaged changes."));
 
 	is_clean = !has_uncommitted_changes(r, 0);
+	git_config_get_bool("rebase.continue.alwaysEdit", &always_edit);
+	if (!always_edit)
+		if (read_commit_flags(&flags))
+			return -1;
 
 	if (file_exists(rebase_path_amend())) {
 		struct strbuf rev = STRBUF_INIT;
@@ -4215,6 +4307,9 @@ static int commit_staged_changes(struct repository *r,
 
 		if (file_exists(cherry_pick_head) && unlink(cherry_pick_head))
 			return error(_("could not remove CHERRY_PICK_HEAD"));
+
+		unlink(rebase_path_commit_flags());
+
 		if (!final_fixup)
 			return 0;
 	}
@@ -4228,15 +4323,22 @@ static int commit_staged_changes(struct repository *r,
 		unlink(rebase_path_fixup_msg());
 		unlink(rebase_path_squash_msg());
 	}
-	if (opts->current_fixup_count > 0) {
+	if (opts->current_fixup_count > 0 && (flags & EDIT_MSG)) {
 		/*
-		 * Whether final fixup or not, we just cleaned up the commit
-		 * message...
+		 * The commit message has been just been cleaned and
+		 * possibly edited so remove stale fixup state.  Note
+		 * that setting current_fixup_count to zero will
+		 * ensure that the squash-message and fixup-message
+		 * files are rewritten by update_squash_messages() so
+		 * there is no need to unlink them when the next
+		 * command is a fixup.
 		 */
 		unlink(rebase_path_current_fixups());
 		strbuf_reset(&opts->current_fixups);
 		opts->current_fixup_count = 0;
 	}
+	unlink(rebase_path_commit_flags());
+
 	return 0;
 }
 
