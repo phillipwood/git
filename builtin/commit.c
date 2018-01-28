@@ -1847,7 +1847,7 @@ int cmd_commit(int argc, const char **argv, const char *prefix)
 	run_auto_maintenance(quiet);
 	run_commit_hook(use_editor, get_index_file(), "post-commit", NULL);
 	if (amend && !no_post_rewrite) {
-		commit_post_rewrite(the_repository, current_head, &oid);
+		commit_post_rewrite(the_repository, current_head, &oid, NULL);
 	}
 	if (!quiet) {
 		unsigned int flags = 0;
