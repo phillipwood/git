@@ -65,6 +65,9 @@ struct replay_opts {
 	struct object_id squash_onto;
 	int have_squash_onto;
 
+	/* Used to update rewritten-list */
+	struct object_id rewritten_head;
+
 	/* Only used by REPLAY_NONE */
 	struct rev_info *revs;
 };
@@ -189,7 +192,8 @@ int update_head_with_reflog(const struct commit *old_head,
 			    struct strbuf *err);
 void commit_post_rewrite(struct repository *r,
 			 const struct commit *current_head,
-			 const struct object_id *new_head);
+			 const struct object_id *new_head,
+			 struct object_id *rewritten_head);
 
 #define SUMMARY_INITIAL_COMMIT   (1 << 0)
 #define SUMMARY_SHOW_AUTHOR_DATE (1 << 1)

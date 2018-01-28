@@ -14,7 +14,11 @@ test_expect_success 'setup' '
 	git checkout A^0 &&
 	test_commit E bar E &&
 	test_commit F foo F &&
-	git checkout master
+	git checkout master &&
+
+	write_script amend-head <<-\EOS
+	git commit --amend --only --allow-empty -m "$1"
+	EOS
 '
 
 mkdir .git/hooks
@@ -260,6 +264,70 @@ test_expect_success 'git rebase -i (exec)' '
 	$(git rev-parse C) $(git rev-parse HEAD^)
 	$(git rev-parse D) $(git rev-parse HEAD)
 	EOF
+	verify_hook_input
+'
+
+test_expect_success 'git rebase -i (exec amends commit)' '
+	git reset --hard D &&
+	clear_hook_input &&
+	test_must_fail env FAKE_LINES="1 \
+		exec_./amend-head_edited-1a \
+		exec_./amend-head_edited-1b \
+		2 \
+		exec_false \
+		3 \
+		break" git rebase -i A &&
+	./amend-head edited-2 &&
+	git rebase --continue &&
+	./amend-head edited-3 &&
+	git rebase --continue &&
+	echo rebase >expected.args &&
+	printf "%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n" >expected.data \
+		$(git rev-parse B        HEAD@{6} \
+				HEAD@{6} HEAD^^   \
+				C        HEAD@{4} \
+				HEAD@{4} HEAD^    \
+				D        HEAD@{2} \
+				HEAD@{2} HEAD) &&
+
+	verify_hook_input
+'
+
+test_expect_success 'git rebase -i (exec amends onto)' '
+	git reset --hard D &&
+	clear_hook_input &&
+	FAKE_LINES="exec_./amend-head_edited 1 \
+		exec_git_commit_--allow-empty_-m_empty \
+		exec_./amend-head_edited-empty" git rebase -i B &&
+	echo rebase >expected.args &&
+	printf "%s %s\n%s %s\n" >expected.data \
+		$(git rev-parse B HEAD^^ \
+				C HEAD^) &&
+	verify_hook_input
+'
+
+test_expect_success 'git rebase -i (fixup after exec)' '
+	git reset --hard D &&
+	clear_hook_input &&
+	FAKE_LINES="1 exec_true fixup 2 squash 3" git rebase -i A &&
+	echo rebase >expected.args &&
+	printf "%s %s\n%s %s\n%s %s\n%s %s\n" >expected.data \
+		$(git rev-parse B        HEAD@{2} \
+				HEAD@{2} HEAD     \
+				C        HEAD     \
+				D        HEAD) &&
+	verify_hook_input
+'
+
+test_expect_success 'git rebase -i (exec after reset)' '
+	git reset --hard D &&
+	clear_hook_input &&
+	FAKE_LINES="reset_C \
+		exec_./amend-head_edited 3" git rebase -i A &&
+	echo rebase >expected.args &&
+	printf "%s %s\n%s %s\n" >expected.data \
+		$(git rev-parse C HEAD^ \
+				D HEAD) &&
 	verify_hook_input
 '
 

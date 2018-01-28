@@ -131,6 +131,7 @@ static GIT_PATH_FUNC(rebase_path_stopped_sha, "rebase-merge/stopped-sha")
 static GIT_PATH_FUNC(rebase_path_rewritten_list, "rebase-merge/rewritten-list")
 static GIT_PATH_FUNC(rebase_path_rewritten_pending,
 	"rebase-merge/rewritten-pending")
+static GIT_PATH_FUNC(rebase_path_rewritten_head, "rebase-merge/rewritten-head")
 
 /*
  * The path of the file containing the OID of the "squash onto" commit, i.e.
@@ -162,6 +163,9 @@ static GIT_PATH_FUNC(rebase_path_allow_rerere_autoupdate, "rebase-merge/allow_re
 static GIT_PATH_FUNC(rebase_path_reschedule_failed_exec, "rebase-merge/reschedule-failed-exec")
 static GIT_PATH_FUNC(rebase_path_drop_redundant_commits, "rebase-merge/drop_redundant_commits")
 static GIT_PATH_FUNC(rebase_path_keep_redundant_commits, "rebase-merge/keep_redundant_commits")
+
+static void write_rewritten_head(struct object_id *rewritten_head);
+static int read_rewritten_head(struct object_id *rewritten_head);
 
 static int git_sequencer_config(const char *k, const char *v, void *cb)
 {
@@ -928,6 +932,7 @@ static int run_git_commit(struct repository *r,
 			  unsigned int flags)
 {
 	struct child_process cmd = CHILD_PROCESS_INIT;
+	int res = 0;
 
 	cmd.git_cmd = 1;
 
@@ -937,6 +942,9 @@ static int run_git_commit(struct repository *r,
 		return error(_(staged_changes_advice),
 			     gpg_opt, gpg_opt);
 	}
+
+	if (is_rebase_i(opts) && (flags & AMEND_MSG))
+		write_rewritten_head(&opts->rewritten_head);
 
 	argv_array_push(&cmd.args, "commit");
 
@@ -966,9 +974,16 @@ static int run_git_commit(struct repository *r,
 		argv_array_push(&cmd.args, "--allow-empty-message");
 
 	if (is_rebase_i(opts) && !(flags & EDIT_MSG))
-		return run_command_silent_on_success(&cmd);
+		res = run_command_silent_on_success(&cmd);
 	else
-		return run_command(&cmd);
+		res = run_command(&cmd);
+
+	if (is_rebase_i(opts) && !res && (flags & AMEND_MSG) &&
+	    read_rewritten_head(&opts->rewritten_head))
+		res = error(_("could not read '%s'"),
+			    rebase_path_rewritten_head());
+
+	return res;
 }
 
 static int rest_is_empty(const struct strbuf *sb, int start)
@@ -1111,11 +1126,42 @@ static int run_rewrite_hook(const struct object_id *oldoid,
 	return finish_command(&proc);
 }
 
+static void update_rewritten(const struct repository *r,
+			     const struct object_id *old_head,
+			     const struct object_id *new_head,
+			     struct object_id *rewritten_head)
+{
+	struct object_id oid;
+
+	if (!rewritten_head) {
+		if (read_rewritten_head(&oid))
+			return;
+		rewritten_head = &oid;
+	}
+	if (oideq(old_head, rewritten_head)) {
+		FILE *fp;
+		fp = fopen_or_warn(rebase_path_rewritten_list(), "a");
+		if (fp) {
+			fprintf(fp, "%s %s\n",
+			    oid_to_hex(old_head), oid_to_hex(new_head));
+			fclose(fp);
+		}
+		oidcpy(rewritten_head, new_head);
+	}
+	if (rewritten_head == &oid)
+		write_rewritten_head(rewritten_head);
+
+	return;
+}
+
 void commit_post_rewrite(struct repository *r,
 			 const struct commit *old_head,
-			 const struct object_id *new_head)
+			 const struct object_id *new_head,
+			 struct object_id *rewritten_head)
 {
 	struct notes_rewrite_cfg *cfg;
+
+	update_rewritten(r, &old_head->object.oid, new_head, rewritten_head);
 
 	cfg = init_copy_notes_for_rewrite("amend");
 	if (cfg) {
@@ -1422,7 +1468,8 @@ static int try_to_commit(struct repository *r,
 
 	run_commit_hook(0, r->index_file, "post-commit", NULL);
 	if (flags & AMEND_MSG)
-		commit_post_rewrite(r, current_head, oid);
+		commit_post_rewrite(r, current_head, oid,
+				    &opts->rewritten_head);
 
 out:
 	free_commit_extra_headers(extra);
@@ -1689,7 +1736,7 @@ static int update_squash_messages(struct repository *r,
 	return res;
 }
 
-static void flush_rewritten_pending(void)
+static void flush_rewritten_pending(struct object_id *rewritten_head)
 {
 	struct strbuf buf = STRBUF_INIT;
 	struct object_id newoid;
@@ -1710,12 +1757,14 @@ static void flush_rewritten_pending(void)
 		}
 		fclose(out);
 		unlink(rebase_path_rewritten_pending());
+		oidcpy(rewritten_head, &newoid);
 	}
 	strbuf_release(&buf);
 }
 
 static void record_in_rewritten(struct object_id *oid,
-		enum todo_command next_command)
+				enum todo_command next_command,
+				struct object_id *rewritten_head)
 {
 	FILE *out = fopen_or_warn(rebase_path_rewritten_pending(), "a");
 
@@ -1726,7 +1775,7 @@ static void record_in_rewritten(struct object_id *oid,
 	fclose(out);
 
 	if (!is_fixup(next_command))
-		flush_rewritten_pending();
+		flush_rewritten_pending(rewritten_head);
 }
 
 static int do_pick_commit(struct repository *r,
@@ -2484,6 +2533,9 @@ static int read_populate_opts(struct replay_opts *opts)
 	if (is_rebase_i(opts)) {
 		struct strbuf buf = STRBUF_INIT;
 
+		if (read_rewritten_head(&opts->rewritten_head))
+			opts->rewritten_head = null_oid;
+
 		if (read_oneliner(&buf, rebase_path_gpg_sign_opt(), 1)) {
 			if (!starts_with(buf.buf, "-S"))
 				strbuf_reset(&buf);
@@ -3051,6 +3103,7 @@ static int error_with_patch(struct repository *r,
 			    struct replay_opts *opts,
 			    int exit_code, int to_amend)
 {
+	write_rewritten_head(&opts->rewritten_head);
 	if (commit) {
 		if (make_patch(r, commit, opts))
 			return -1;
@@ -3105,12 +3158,14 @@ static int error_failed_squash(struct repository *r,
 	return error_with_patch(r, commit, subject, subject_len, opts, 1, 0);
 }
 
-static int do_exec(struct repository *r, const char *command_line)
+static int do_exec(struct repository *r, const char *command_line,
+		   struct object_id *rewritten_head)
 {
 	struct argv_array child_env = ARGV_ARRAY_INIT;
 	const char *child_argv[] = { NULL, NULL };
 	int dirty, status;
 
+	write_rewritten_head(rewritten_head);
 	fprintf(stderr, "Executing: %s\n", command_line);
 	child_argv[0] = command_line;
 	argv_array_pushf(&child_env, "GIT_DIR=%s", absolute_path(get_git_dir()));
@@ -3119,6 +3174,9 @@ static int do_exec(struct repository *r, const char *command_line)
 	status = run_command_v_opt_cd_env(child_argv, RUN_USING_SHELL, NULL,
 					  child_env.argv);
 
+	if (read_rewritten_head(rewritten_head))
+		return error(_("could not read '%s'"),
+			       rebase_path_rewritten_head());
 	/* force re-reading of the cache */
 	if (discard_index(r->index) < 0 || repo_read_index(r) < 0)
 		return error(_("could not read index"));
@@ -3317,10 +3375,12 @@ static int do_reset(struct repository *r,
 		ret = error(_("could not write index"));
 	free((void *)desc.buffer);
 
-	if (!ret)
+	if (!ret) {
 		ret = update_ref(reflog_message(opts, "reset", "'%.*s'",
 						len, name), "HEAD", &oid,
 				 NULL, 0, UPDATE_REFS_MSG_ON_ERR);
+		oidcpy(&opts->rewritten_head, &oid);
+	}
 
 	strbuf_release(&ref_name);
 	return ret;
@@ -3836,6 +3896,7 @@ static int pick_commits(struct repository *r,
 			delete_ref(NULL, "REBASE_HEAD", NULL, REF_NO_DEREF);
 
 			if (item->command == TODO_BREAK) {
+				write_rewritten_head(&opts->rewritten_head);
 				if (!opts->verbose)
 					term_clear_line();
 				return stopped_at_head(r);
@@ -3875,7 +3936,8 @@ static int pick_commits(struct repository *r,
 			}
 			if (is_rebase_i(opts) && !res)
 				record_in_rewritten(&item->commit->object.oid,
-					peek_command(todo_list, 1));
+						    peek_command(todo_list, 1),
+						    &opts->rewritten_head);
 			if (res && is_fixup(item->command)) {
 				if (res == 1)
 					intend_to_amend();
@@ -3909,7 +3971,7 @@ static int pick_commits(struct repository *r,
 			if (!opts->verbose)
 				term_clear_line();
 			*end_of_arg = '\0';
-			res = do_exec(r, arg);
+			res = do_exec(r, arg, &opts->rewritten_head);
 			*end_of_arg = saved;
 
 			if (res) {
@@ -3930,7 +3992,8 @@ static int pick_commits(struct repository *r,
 				reschedule = 1;
 			else if (item->commit)
 				record_in_rewritten(&item->commit->object.oid,
-						    peek_command(todo_list, 1));
+						    peek_command(todo_list, 1),
+						    &opts->rewritten_head);
 			if (res > 0)
 				/* failed with merge conflicts */
 				return error_with_patch(r, item->commit,
@@ -4041,7 +4104,7 @@ cleanup_head_ref:
 				log_tree_diff_flush(&log_tree_opt);
 			}
 		}
-		flush_rewritten_pending();
+		flush_rewritten_pending(&opts->rewritten_head);
 		if (!stat(rebase_path_rewritten_list(), &st) &&
 				st.st_size > 0) {
 			struct child_process child = CHILD_PROCESS_INIT;
@@ -4289,7 +4352,8 @@ int sequencer_continue(struct repository *r, struct replay_opts *opts)
 
 		if (read_oneliner(&buf, rebase_path_stopped_sha(), 1) &&
 		    !get_oid_committish(buf.buf, &oid))
-			record_in_rewritten(&oid, peek_command(&todo_list, 0));
+			record_in_rewritten(&oid, peek_command(&todo_list, 0),
+					    &opts->rewritten_head);
 		strbuf_release(&buf);
 	}
 
@@ -5004,7 +5068,8 @@ int todo_list_write_to_file(struct repository *r, struct todo_list *todo_list,
 /* skip picking commits whose parents are unchanged */
 static int skip_unnecessary_picks(struct repository *r,
 				  struct todo_list *todo_list,
-				  struct object_id *base_oid)
+				  struct object_id *base_oid,
+				  struct object_id *rewritten_head)
 {
 	struct object_id *parent_oid;
 	int i;
@@ -5042,8 +5107,15 @@ static int skip_unnecessary_picks(struct repository *r,
 		todo_list->current = 0;
 		todo_list->done_nr += i;
 
-		if (is_fixup(peek_command(todo_list, 0)))
-			record_in_rewritten(base_oid, peek_command(todo_list, 0));
+		if (is_fixup(peek_command(todo_list, 0))) {
+			record_in_rewritten(base_oid, peek_command(todo_list, 0),
+					    rewritten_head);
+			oidcpy(rewritten_head, &null_oid);
+		} else {
+			oidcpy(rewritten_head, base_oid);
+		}
+	} else {
+		oidcpy(rewritten_head, base_oid);
 	}
 
 	return 0;
@@ -5114,7 +5186,8 @@ int complete_action(struct repository *r, struct replay_opts *opts, unsigned fla
 		BUG("invalid todo list after expanding IDs:\n%s",
 		    new_todo.buf.buf);
 
-	if (opts->allow_ff && skip_unnecessary_picks(r, &new_todo, &oid)) {
+	if (opts->allow_ff &&
+	    skip_unnecessary_picks(r, &new_todo, &oid, &opts->rewritten_head)) {
 		todo_list_release(&new_todo);
 		return error(_("could not skip unnecessary pick commands"));
 	}
@@ -5312,4 +5385,26 @@ int todo_list_rearrange_squash(struct todo_list *todo_list)
 	clear_commit_todo_item(&commit_todo);
 
 	return 0;
+}
+static void write_rewritten_head(struct object_id *rewritten_head)
+{
+	const char *hex = oid_to_hex(rewritten_head);
+
+	write_message(hex, strlen(hex), rebase_path_rewritten_head(), 1);
+}
+
+static int read_rewritten_head(struct object_id *rewritten_head)
+{
+	struct strbuf buf = STRBUF_INIT;
+	int ret = 0;
+
+	if (!read_oneliner(&buf, rebase_path_rewritten_head(), 0))
+		return -1;
+
+	if (get_oid(buf.buf, rewritten_head))
+		ret = error(_("could not parse oid '%s'"), buf.buf);
+
+	strbuf_release(&buf);
+
+	return ret;
 }
