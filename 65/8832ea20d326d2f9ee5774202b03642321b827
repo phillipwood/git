@@ -1,0 +1,5 @@
+changes since v1:
+ - changed edit test to use the existing fake editor and to strip
+   the hunk header and some context lines as well as deleting an
+   insertion
+ - style fixes
