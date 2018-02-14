@@ -1,0 +1,5 @@
+changes since v3:
+ - fix zero hash values to seven digits
+changes since v2:
+ - fix hash values in index lines rather than removing the line
+ - reworded commit message
