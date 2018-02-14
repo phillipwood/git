@@ -1,0 +1,3 @@
+changes since v2:
+ - fix hash values in index lines rather than removing the line
+ - reworded commit message
