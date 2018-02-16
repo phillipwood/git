@@ -1,0 +1,2 @@
+changes since v1:
+ - changed edit test to use the existing fake editor
