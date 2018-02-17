@@ -1,3 +1,5 @@
 changes since v1
  - edited hunks are now recounted before seeing if they apply in
    preparation for removing '--recount' when invoking 'git apply'
+ - added sentence to commit message about the offset data being lost
+   if an edited hunk is split
