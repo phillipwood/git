@@ -1,0 +1,3 @@
+changes since v1
+ - edited hunks are now recounted before seeing if they apply in
+   preparation for removing '--recount' when invoking 'git apply'
