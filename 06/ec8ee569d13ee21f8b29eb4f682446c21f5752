@@ -1,5 +1,5 @@
 changes since v2:
- - fixed use of test_set_editor
+ - removed test_set_editor as it is already set
 
 changes since v1:
  - changed edit test to use the existing fake editor and to strip
