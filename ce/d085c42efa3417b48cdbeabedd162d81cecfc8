@@ -1,0 +1,8 @@
+changes since v2:
+ - removed test_set_editor as it is already set
+
+changes since v1:
+ - changed edit test to use the existing fake editor and to strip
+   the hunk header and some context lines as well as deleting an
+   insertion
+ - style fixes
