@@ -1,3 +1,11 @@
+changes since v4:
+ - replaced instances of
+     <<conditional>> and <<statement with side effect>>;
+   with
+     if (<<conditional>>) {
+	<<statement with side effect>>;
+     }
+
 changes since v1
  - edited hunks are now recounted before seeing if they apply in
    preparation for removing '--recount' when invoking 'git apply'
