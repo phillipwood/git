@@ -1,8 +1,4 @@
 changes since v4:
  - use a separate if clause to handle with "\ No newline at end of
-   file" lines rather than crow-baring them into the "+" line
+   file" lines rather than crowbarring them into the "+" line
    handling.
-
-changes since v4:
- - use a separate if clause to handle with "\ No new line..." lines
-   rather than crow-baring them into the "+" line handling.
