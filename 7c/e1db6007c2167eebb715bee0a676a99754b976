@@ -1,0 +1,3 @@
+changes since v2:
+ - use '-' to invert the selection instead of '^' to be consistent
+   with the rest of add -i and clean -i.
