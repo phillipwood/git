@@ -1248,8 +1248,21 @@ sub parse_hunk_selection {
 	my ($hunk, $line) = @_;
 	my $lines = $hunk->{LABELS}->{LINES};
 	my $max_label = $#{$lines};
+	my $invert = undef;
 	my %selected;
 	my @fields = split(/[,\s]+/, $line);
+	if (my ($rest) = ($fields[0] =~ /^-(.*)/)) {
+		$invert = 1;
+		if ($rest ne '') {
+			$fields[0] = $rest;
+		} else {
+			shift @fields;
+			unless (@fields) {
+				error_msg __("no lines to invert\n");
+				return undef;
+			}
+		}
+	}
 	for my $f (@fields) {
 		if (my ($lo, $hi) = ($f =~ /^([0-9]+)-([0-9]*)$/)) {
 			if ($hi eq '') {
@@ -1268,6 +1281,12 @@ sub parse_hunk_selection {
 			error_msg sprintf(__("invalid hunk line '%s'\n"), $f);
 			return undef;
 		}
+	}
+	if ($invert) {
+		my %inverted;
+		undef @inverted{1..$max_label};
+		delete @inverted{keys(%selected)};
+		%selected = %inverted;
 	}
 	return process_hunk_selection($hunk, keys(%selected));
 }
