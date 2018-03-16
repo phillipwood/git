@@ -1,0 +1,3 @@
+changes since v2:
+ - removed code that handled the default lower bound now that '-...'
+   means invert the selection.
