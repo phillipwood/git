@@ -1013,6 +1013,171 @@ sub color_diff {
 	} @_;
 }
 
+use constant {
+	NO_NEWLINE => 1,
+};
+
+sub label_hunk_lines {
+	my $hunk = shift;
+	my $text = $hunk->{TEXT};
+	my (@line_flags, @lines);
+	my ($block, $label, $last_mode) = (0, 0, '');
+	for my $line (1..$#{$text}) {
+		$line_flags[$line] = 0;
+		my $mode = substr($text->[$line], 0, 1);
+		if ($mode eq '\\') {
+			$line_flags[$line - 1] |= NO_NEWLINE;
+		}
+		if ($mode eq '-' or $mode eq '+') {
+			$lines[++$label] = $line;
+		}
+	}
+	if ($label > 1) {
+		$hunk->{LABELS} = {
+			LINES => \@lines,
+		};
+		$hunk->{LINE_FLAGS} = \@line_flags;
+		return 1;
+	}
+	return 0;
+}
+
+sub select_hunk_lines {
+	my ($hunk, $selected) = @_;
+	my ($line_flags, $text) = @{$hunk}{qw(LINE_FLAGS TEXT)};
+	my ($i, $o_cnt, $n_cnt) = (0, 0, 0);
+	my @newtext;
+
+	my $select_lines = sub {
+		for my $i (@_) {
+			my $line = $text->[$i];
+			my $mode = substr($line, 0, 1);
+			push @newtext, $line;
+			if ($mode eq '+') {
+				$n_cnt++;
+			} elsif ($mode eq '-') {
+				$o_cnt++;
+			}
+		}
+	};
+
+	my ($lo, $hi) = splice(@$selected, 0, 2);
+	# Lines with this mode will become context lines if they are
+	# not selected
+	my $context_mode = $patch_mode_flavour{IS_REVERSE} ? '+' : '-';
+	for $i (1..$#{$text}) {
+		if ($lo <= $i and $i <= $hi) {
+			$select_lines->($i);
+		} else {
+			my $line = $text->[$i];
+			my $mode = substr($line, 0, 1);
+			if ($mode eq ' ' or $mode eq $context_mode) {
+				push @newtext, ' ' . substr($line, 1);
+				$o_cnt++; $n_cnt++;
+				if ($line_flags->[$i] & NO_NEWLINE) {
+					push @newtext, $text->[$i + 1];
+				}
+			}
+		}
+		if ($i == $hi) {
+			if (@$selected) {
+				($lo, $hi) = splice(@$selected, 0, 2);
+			}
+		}
+	}
+	my ($o_ofs, $orig_o_cnt, $n_ofs, $orig_n_cnt) =
+					parse_hunk_header($text->[0]);
+	unshift @newtext, format_hunk_header($o_ofs, $o_cnt, $n_ofs, $n_cnt);
+	my $newhunk = {
+		TEXT => \@newtext,
+		DISPLAY => [ color_diff(@newtext) ],
+		OFS_DELTA => $orig_o_cnt - $orig_n_cnt - $o_cnt + $n_cnt,
+		TYPE => $hunk->{TYPE},
+		USE => 1,
+	};
+	# If this hunk has previously been edited add the offset delta
+	# of the old hunk to get the real delta from the original
+	# hunk.
+	if ($hunk->{OFS_DELTA}) {
+		$newhunk->{OFS_DELTA} += $hunk->{OFS_DELTA};
+	}
+	return $newhunk;
+}
+
+sub check_hunk_label {
+	my ($max_label, $label) = @_;
+	if ($label < 1 or $label > $max_label) {
+		error_msg sprintf(__("invalid hunk line '%d'\n"), $label);
+		return 0;
+	}
+	return 1;
+}
+
+sub parse_hunk_selection {
+	my ($hunk, $line) = @_;
+	my $lines = $hunk->{LABELS}->{LINES};
+	my $max_label = $#{$lines};
+	my %selected;
+	my @fields = split(/[,\s]+/, $line);
+	for my $f (@fields) {
+		if (my ($lo, $hi) = ($f =~ /^([0-9]+)-([0-9]*)$/)) {
+			if ($hi eq '') {
+				$hi = $max_label;
+			}
+			check_hunk_label($max_label, $lo) or return undef;
+			check_hunk_label($max_label, $hi) or return undef;
+			if ($hi < $lo) {
+				($lo, $hi) = ($hi, $lo);
+			}
+			undef @selected{$lo..$hi};
+		} elsif (my ($label) = ($f =~ /^([0-9]+)$/)) {
+			check_hunk_label($max_label, $label) or return undef;
+			undef $selected{$label};
+		} else {
+			error_msg sprintf(__("invalid hunk line '%s'\n"), $f);
+			return undef;
+		}
+	}
+	[ map {
+		my $line = $lines->[$_];
+		if ($hunk->{LINE_FLAGS}->[$line] & NO_NEWLINE) {
+			($line, $line + 1);
+		} else {
+			($line, $line);
+		}
+	} sort { $a <=> $b } keys(%selected) ];
+}
+
+sub display_hunk_lines {
+	my $hunk = shift;
+	my ($display, $lines) = ($hunk->{DISPLAY}, $hunk->{LABELS}->{LINES});
+	my $max_label = $#{$lines};
+	my $width = int(log($max_label) / log(10)) + 1;
+	my $padding = ' ' x ($width + 1);
+	my $label = 1;
+	for my $line (0..$#{$display}) {
+		if ($lines->[$label] == $line) {
+			printf '%*d %s', $width, $label, $display->[$line];
+			$label++ if ($label < $max_label);
+		} else {
+			print $padding . $display->[$line];
+		}
+	}
+}
+
+sub select_lines_loop {
+	my $hunk = shift;
+	display_hunk_lines($hunk);
+	my $selection = undef;
+	until (defined $selection) {
+		print colored $prompt_color, __("select lines? ");
+		my $text = <STDIN>;
+		defined $text and $text =~ /\S/ or return undef;
+		$selection = parse_hunk_selection($hunk, $text);
+	}
+	return select_hunk_lines($hunk, $selection);
+}
+
 my %edit_hunk_manually_modes = (
 	stage => N__(
 "If the patch applies cleanly, the edited hunk will immediately be
@@ -1255,6 +1420,7 @@ j - leave this hunk undecided, see next undecided hunk
 J - leave this hunk undecided, see next hunk
 k - leave this hunk undecided, see previous undecided hunk
 K - leave this hunk undecided, see previous hunk
+l - select hunk lines to use
 s - split the current hunk into smaller hunks
 e - manually edit the current hunk
 ? - print help
@@ -1471,6 +1637,9 @@ sub patch_update_file {
 		if ($hunk[$ix]{TYPE} eq 'hunk') {
 			$other .= ',e';
 		}
+		if (label_hunk_lines($hunk[$ix])) {
+			$other .= ',l';
+		}
 		for (@{$hunk[$ix]{DISPLAY}}) {
 			print;
 		}
@@ -1607,6 +1776,18 @@ sub patch_update_file {
 			elsif ($line =~ /^j/) {
 				if ($other !~ /j/) {
 					error_msg __("No next hunk\n");
+					next;
+				}
+			}
+			elsif ($line =~ /^l/) {
+				unless ($other =~ /l/) {
+					error_msg __("Cannot select line by line\n");
+					next;
+				}
+				my $newhunk = select_lines_loop($hunk[$ix]);
+				if ($newhunk) {
+					splice @hunk, $ix, 1, $newhunk;
+				} else {
 					next;
 				}
 			}
