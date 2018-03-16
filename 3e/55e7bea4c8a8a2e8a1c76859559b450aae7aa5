@@ -1,0 +1,4 @@
+changes since v1:
+ - added support for --signoff with --interactive and --merge as
+   suggested by Johannes
+ - reworded commit message to reflect above changes
