@@ -340,10 +340,11 @@ patch::
 If you press "l" then the hunk will be reprinted with each insertion or
 deletion labelled with a number and you will be prompted to enter which
 lines you wish to select. Individual line numbers should be separated by
-a space or comma, to specify a range of lines use a dash between
-them. If the upper bound of a range of lines is omitted it defaults to
-the last line. To invert the selection prefix it with "-" so "-3-5,8"
-will select everything except lines 3, 4, 5 and 8.
+a space or comma (these can be omitted if there are fewer than ten
+labelled lines), to specify a range of lines use a dash between them. If
+the upper bound of a range of lines is omitted it defaults to the last
+line. To invert the selection prefix it with "-" so "-3-5,8" will select
+everything except lines 3, 4, 5 and 8.
 +
 After deciding the fate for all hunks, if there is any hunk
 that was chosen, the index is updated with the selected hunks.
