@@ -1,6 +1,6 @@
 changes since v1:
  - added support for --signoff with --interactive and --merge as
-   suggested by Johannes
+   suggested by Johannes and Junio
  - split out the --preserve-merges test into the next commit as
    suggested by Johannes
  - updated the documentation for --signoff
