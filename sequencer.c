@@ -5659,14 +5659,16 @@ int todo_list_rearrange_squash(struct todo_list *todo_list)
 		format_subject(&buf, subject, " ");
 		subject = subjects[i] = strbuf_detach(&buf, &subject_len);
 		unuse_commit_buffer(item->commit, commit_buffer);
-		if ((skip_prefix(subject, "fixup! ", &p) ||
+		if ((skip_prefix(subject, "amend! ", &p) ||
+		     skip_prefix(subject, "fixup! ", &p) ||
 		     skip_prefix(subject, "squash! ", &p))) {
 			struct commit *commit2;
 
 			for (;;) {
 				while (isspace(*p))
 					p++;
-				if (!skip_prefix(p, "fixup! ", &p) &&
+				if (!skip_prefix(p, "amend! ", &p) &&
+				    !skip_prefix(p, "fixup! ", &p) &&
 				    !skip_prefix(p, "squash! ", &p))
 					break;
 			}
@@ -5697,9 +5699,12 @@ int todo_list_rearrange_squash(struct todo_list *todo_list)
 		}
 		if (i2 >= 0) {
 			rearranged = 1;
-			todo_list->items[i].command =
-				starts_with(subject, "fixup!") ?
-				TODO_FIXUP : TODO_SQUASH;
+			if (starts_with(subject, "amend!"))
+				todo_list->items[i].command = TODO_AMEND;
+			else if (starts_with(subject, "fixup!"))
+				todo_list->items[i].command = TODO_FIXUP;
+			else
+				todo_list->items[i].command = TODO_SQUASH;
 			if (tail[i2] < 0) {
 				next[i] = next[i2];
 				next[i2] = i;

@@ -127,10 +127,10 @@ test_expect_success 'skipping amend after fixup gives correct message' '
 
 test_expect_success 'sequence of fixup, amend & squash --signoff works' '
 	git checkout --detach branch &&
-	FAKE_LINES="1 fixup 2 amend 3 amend 4 squash 5 amend 6" \
 	FAKE_COMMIT_AMEND=squashed \
 	FAKE_MESSAGE_COPY=actual-squash-message \
-		git -c commit.status=false rebase -ik --signoff A &&
+		git -c commit.status=false rebase -ik --autosquash \
+						--signoff A &&
 	git diff-tree --exit-code --patch HEAD branch -- &&
 	test_cmp_rev HEAD^ A &&
 	test_i18ncmp "$TEST_DIRECTORY/t3437/expected-squash-message" \
