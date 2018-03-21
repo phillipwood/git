@@ -105,7 +105,7 @@ static const char *template_file;
  */
 static const char *author_message, *author_message_buffer;
 static char *edit_message, *use_message;
-static char *fixup_message, *squash_message;
+static const char *amend_message, *fixup_message, *squash_message;
 static int all, also, interactive, patch_interactive, only, amend, signoff;
 static int edit_flag = -1; /* unspecified */
 static int quiet, verbose, no_verify, allow_empty, dry_run, renew_authorship;
@@ -174,6 +174,17 @@ static int opt_parse_rename_score(const struct option *opt, const char *arg, int
 		arg = arg + 1;
 
 	*value = arg;
+	return 0;
+}
+
+static int opt_parse_amend(const struct option *opt, const char *arg, int unset)
+{
+	if (unset)
+		amend = 0;
+	else if (arg)
+		amend_message = arg;
+	else
+		amend = 1;
 	return 0;
 }
 
@@ -719,6 +730,36 @@ static int prepare_to_commit(const char *index_file, const char *prefix,
 			format_commit_message(c, "squash! %s\n\n", &sb,
 					      &ctx);
 		}
+	} else if (amend_message) {
+		struct pretty_print_context ctx = {0};
+		struct commit *c;
+		c = lookup_commit_reference_by_name(amend_message);
+		if (!c)
+			die(_("could not lookup commit %s"), amend_message);
+		ctx.output_encoding = get_commit_output_encoding();
+		if (logfile || use_message || have_option_m) {
+			format_commit_message(c, "amend! %s\n\n", &sb, &ctx);
+		} else {
+			char *subject;
+			size_t off;
+			strbuf_addstr(&sb, "amend! ");
+			off = sb.len;
+			format_commit_message(c, "%B", &sb, &ctx);
+			subject = sb.buf + off;
+			/*
+			 * If the message does not start with 'amend!' then we
+			 * duplicate the subject line, ready for the user to
+			 * edit.
+			 */
+			if (!starts_with(subject, "amend!")) {
+				struct strbuf buf = STRBUF_INIT;
+				const char *end = strstr(subject, "\n\n");
+				int len = end ? end - subject : sb.len - off;
+				strbuf_addf(&buf, "%.*s\n\n", len, subject);
+				strbuf_insert(&sb, off, buf.buf, buf.len);
+				strbuf_release(&buf);
+			}
+		}
 	}
 
 	if (have_option_m && !fixup_message) {
@@ -1186,8 +1227,9 @@ static int parse_and_validate_options(int argc, const char *argv[],
 		else if (whence == FROM_REBASE_PICK)
 			die(_("You are in the middle of a rebase -- cannot amend."));
 	}
-	if (fixup_message && squash_message)
-		die(_("Options --squash and --fixup cannot be used together"));
+	if ((fixup_message && squash_message) ||
+	    (amend_message && (fixup_message || squash_message)))
+		die(_("Only one of --amend=<commit>/--squash/--fixup can be used."));
 	if (use_message)
 		f++;
 	if (edit_message)
@@ -1536,7 +1578,9 @@ int cmd_commit(int argc, const char **argv, const char *prefix)
 			    STATUS_FORMAT_LONG),
 		OPT_BOOL('z', "null", &s.null_termination,
 			 N_("terminate entries with NUL")),
-		OPT_BOOL(0, "amend", &amend, N_("amend previous commit")),
+		{ OPTION_CALLBACK, 0, "amend", &amend, N_("commit"),
+		  N_("amend previous commit (Default HEAD)"), PARSE_OPT_OPTARG,
+		  opt_parse_amend, 0 },
 		OPT_BOOL(0, "no-post-rewrite", &no_post_rewrite, N_("bypass post-rewrite hook")),
 		{ OPTION_STRING, 'u', "untracked-files", &untracked_files_arg, N_("mode"), N_("show untracked files, optional modes: all, normal, no. (Default: all)"), PARSE_OPT_OPTARG, NULL, (intptr_t)"all" },
 		OPT_PATHSPEC_FROM_FILE(&pathspec_from_file),
