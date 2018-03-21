@@ -1628,6 +1628,7 @@ static struct {
 	{ 0,   "revert" },
 	{ 'e', "edit" },
 	{ 'r', "reword" },
+	{ 'a', "amend" },
 	{ 'f', "fixup" },
 	{ 's', "squash" },
 	{ 'x', "exec" },
@@ -1661,7 +1662,8 @@ static int is_noop(const enum todo_command command)
 
 static int is_fixup(enum todo_command command)
 {
-	return command == TODO_FIXUP || command == TODO_SQUASH;
+	return command == TODO_FIXUP || command == TODO_SQUASH ||
+		command == TODO_AMEND;
 }
 
 /* Does this command create a (non-merge) commit? */
@@ -1672,6 +1674,7 @@ static int is_pick_or_similar(enum todo_command command)
 	case TODO_REVERT:
 	case TODO_EDIT:
 	case TODO_REWORD:
+	case TODO_AMEND:
 	case TODO_FIXUP:
 	case TODO_SQUASH:
 		return 1;
@@ -1698,20 +1701,152 @@ static size_t subject_length(const char *body)
 	return blank_line ? len : i;
 }
 
-static void append_squash_message(struct strbuf *buf, const char *body,
-				  struct replay_opts *opts)
+/*
+ * Wrapper around strbuf_add_commented_lines() which avoids double
+ * commenting commit subjects.
+ */
+static void add_commented_lines(struct strbuf *buf, const void *str, size_t len)
 {
-	size_t commented_len = 0;
+	const char *s = str;
+	while (len > 0 && s[0] == comment_line_char) {
+		size_t count;
+		const char *n = memchr(s, '\n', len);
+		if (!n)
+			count = len;
+		else
+			count = n - s + 1;
+		strbuf_add(buf, s, count);
+		s += count;
+		len -= count;
+	}
+	strbuf_add_commented_lines(buf, s, len);
+}
 
-	unlink(rebase_path_fixup_msg());
-	if (starts_with(body, "squash!") || starts_with(body, "fixup!"))
+/* Does the current fixup chain contain a squash command? */
+static int seen_squash(struct replay_opts *opts)
+{
+	return starts_with(opts->current_fixups.buf, "squash") ||
+		strstr(opts->current_fixups.buf, "\nsquash");
+}
+
+#define FIRST_COMMIT_MSG_STR N_("This is the 1st commit message:")
+#define SKIP_FIRST_COMMIT_MSG_STR N_("The 1st commit message will be skipped:")
+#define NTH_COMMIT_MSG_FMT N_("This is the commit message #%d:")
+#define SKIP_NTH_COMMIT_MSG_FMT N_("The commit message #%d will be skipped:")
+
+static void update_comment_bufs(struct strbuf *buf1, struct strbuf *buf2, int n)
+{
+	strbuf_setlen(buf1, 2);
+	strbuf_addf(buf1, _(NTH_COMMIT_MSG_FMT), n);
+	strbuf_addch(buf1, '\n');
+	strbuf_setlen(buf2, 2);
+	strbuf_addf(buf2, _(SKIP_NTH_COMMIT_MSG_FMT), n);
+	strbuf_addch(buf2, '\n');
+}
+
+/*
+ * Comment out any un-commented commit messages, updating the message comments
+ * to say they will be skipped but do not comment out the empty lines that
+ * surround commit messages and their comments.
+ */
+static void update_squash_message_for_amend(struct strbuf *msg)
+{
+	void (*copy_lines)(struct strbuf *, const void *, size_t) = strbuf_add;
+	struct strbuf buf1 = STRBUF_INIT, buf2 = STRBUF_INIT;
+	const char *s, *start;
+	char *orig_msg;
+	size_t orig_msg_len;
+	int i = 1;
+
+	strbuf_addf(&buf1, "# %s\n", _(FIRST_COMMIT_MSG_STR));
+	strbuf_addf(&buf2, "# %s\n", _(SKIP_FIRST_COMMIT_MSG_STR));
+	s = start = orig_msg = strbuf_detach(msg, &orig_msg_len);
+	while (s) {
+		const char *next;
+		size_t off;
+		if (skip_prefix(s, buf1.buf, &next)) {
+			/*
+			 * Copy the last message, preserving the blank line
+			 * preceding the current line
+			 */
+			off = (s > start + 1 && s[-2] == '\n') ? 1 : 0;
+			copy_lines(msg, start, s - start - off);
+			if (off)
+				strbuf_addch(msg, '\n');
+			/*
+			 * The next message needs to be commented out but the
+			 * message header is already commented out so just copy
+			 * it and the blank line that follows it.
+			 */
+			strbuf_addbuf(msg, &buf2);
+			if (*next == '\n')
+				strbuf_addch(msg, *next++);
+			start = s = next;
+			copy_lines = add_commented_lines;
+			update_comment_bufs(&buf1, &buf2, ++i);
+		} else if (skip_prefix(s, buf2.buf, &next)) {
+			off = (s > start + 1 && s[-2] == '\n') ? 1 : 0;
+			copy_lines(msg, start, s - start - off);
+			start = s - off;
+			s = next;
+			copy_lines = strbuf_add;
+			update_comment_bufs(&buf1, &buf2, ++i);
+		} else {
+			s = strchr(s, '\n');
+			if (s)
+				s++;
+		}
+	}
+	copy_lines(msg, start, orig_msg_len - (start - orig_msg));
+	free(orig_msg);
+	strbuf_release(&buf1);
+	strbuf_release(&buf2);
+}
+
+static int append_squash_message(struct strbuf *buf, const char *body,
+			 enum todo_command command, struct replay_opts *opts)
+{
+	const char *fixup_msg;
+	size_t commented_len = 0, fixup_off;
+	/*
+	 * amend is non-interactive and not normally used with fixup!
+	 * or squash! commits, so only comment out those subjects when
+	 * squashing commit messages.
+	 */
+	if (starts_with(body, "amend!") ||
+	    ((command == TODO_SQUASH || seen_squash(opts)) &&
+	     (starts_with(body, "squash!") || starts_with(body, "fixup!"))))
 		commented_len = subject_length(body);
+
 	strbuf_addf(buf, "\n%c ", comment_line_char);
-	strbuf_addf(buf, _("This is the commit message #%d:"),
+	strbuf_addf(buf, _(NTH_COMMIT_MSG_FMT),
 		    ++opts->current_fixup_count + 1);
 	strbuf_addstr(buf, "\n\n");
 	strbuf_add_commented_lines(buf, body, commented_len);
+	/* buf->buf may be reallocated so store an offset into the buffer */
+	fixup_off = buf->len;
 	strbuf_addstr(buf, body + commented_len);
+
+	/* amend after squash behaves like squash */
+	if (command == TODO_AMEND && !seen_squash(opts)) {
+			/*
+			 * We're replacing the commit message so we need to
+			 * append the Signed-off-by: trailer if the user
+			 * requested '--signoff'.
+			 */
+			if (opts->signoff)
+				append_signoff(buf, 0, 0);
+
+			fixup_msg = skip_blank_lines(buf->buf + fixup_off);
+			if (write_message(fixup_msg, strlen(fixup_msg),
+					  rebase_path_fixup_msg(), 0))
+				return error(_("cannot write '%s'"),
+					     rebase_path_fixup_msg());
+	} else {
+		unlink(rebase_path_fixup_msg());
+	}
+
+	return 0;
 }
 
 static int update_squash_messages(struct repository *r,
@@ -1720,7 +1855,7 @@ static int update_squash_messages(struct repository *r,
 				  struct replay_opts *opts)
 {
 	struct strbuf buf = STRBUF_INIT;
-	int res;
+	int res = 0;
 	const char *message, *body;
 	const char *encoding = get_commit_output_encoding();
 
@@ -1740,6 +1875,8 @@ static int update_squash_messages(struct repository *r,
 			    opts->current_fixup_count + 2);
 		strbuf_splice(&buf, 0, eol - buf.buf, header.buf, header.len);
 		strbuf_release(&header);
+		if (command == TODO_AMEND && !seen_squash(opts))
+			update_squash_message_for_amend(&buf);
 	} else {
 		struct object_id head;
 		struct commit *head_commit;
@@ -1761,13 +1898,18 @@ static int update_squash_messages(struct repository *r,
 					     rebase_path_fixup_msg());
 			}
 		}
-
 		strbuf_addf(&buf, "%c ", comment_line_char);
 		strbuf_addf(&buf, _("This is a combination of %d commits."), 2);
 		strbuf_addf(&buf, "\n%c ", comment_line_char);
-		strbuf_addstr(&buf, _("This is the 1st commit message:"));
+		strbuf_addstr(&buf,
+			      command == TODO_AMEND ?
+			      _(SKIP_FIRST_COMMIT_MSG_STR) :
+			      _(FIRST_COMMIT_MSG_STR));
 		strbuf_addstr(&buf, "\n\n");
-		strbuf_addstr(&buf, body);
+		if (command == TODO_AMEND)
+			strbuf_add_commented_lines(&buf, body, strlen(body));
+		else
+			strbuf_addstr(&buf, body);
 
 		unuse_commit_buffer(head_commit, head_message);
 	}
@@ -1777,11 +1919,11 @@ static int update_squash_messages(struct repository *r,
 			     oid_to_hex(&commit->object.oid));
 	find_commit_subject(message, &body);
 
-	if (command == TODO_SQUASH) {
-		append_squash_message(&buf, body, opts);
+	if (command == TODO_SQUASH || command == TODO_AMEND) {
+		res = append_squash_message(&buf, body, command, opts);
 	} else if (command == TODO_FIXUP) {
 		strbuf_addf(&buf, "\n%c ", comment_line_char);
-		strbuf_addf(&buf, _("The commit message #%d will be skipped:"),
+		strbuf_addf(&buf, _(SKIP_NTH_COMMIT_MSG_FMT),
 			    ++opts->current_fixup_count + 1);
 		strbuf_addstr(&buf, "\n\n");
 		strbuf_add_commented_lines(&buf, body, strlen(body));
@@ -1789,7 +1931,9 @@ static int update_squash_messages(struct repository *r,
 		return error(_("unknown command: %d"), command);
 	unuse_commit_buffer(commit, message);
 
-	res = write_message(buf.buf, buf.len, rebase_path_squash_msg(), 0);
+	if (!res)
+		res = write_message(buf.buf, buf.len, rebase_path_squash_msg(),
+				    0);
 	strbuf_release(&buf);
 
 	if (!res) {
@@ -1804,6 +1948,11 @@ static int update_squash_messages(struct repository *r,
 
 	return res;
 }
+
+#undef FIRST_COMMIT_MSG_STR
+#undef SKIP_FIRST_COMMIT_MSG_STR
+#undef NTH_COMMIT_MSG_FMT
+#undef SKIP_NTH_COMMIT_MSG_FMT
 
 static void flush_rewritten_pending(void)
 {

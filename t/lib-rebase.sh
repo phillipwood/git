@@ -4,6 +4,7 @@
 #
 # - override the commit message with $FAKE_COMMIT_MESSAGE
 # - amend the commit message with $FAKE_COMMIT_AMEND
+# - copy the original commit message to a file with $FAKE_MESSAGE_COPY
 # - check that non-commit messages have a certain line count with $EXPECT_COUNT
 # - check the commit count in the commit message header with $EXPECT_HEADER_COUNT
 # - rewrite a rebase -i script as directed by $FAKE_LINES.
@@ -33,6 +34,7 @@ set_fake_editor () {
 			exit
 		test -z "$FAKE_COMMIT_MESSAGE" || echo "$FAKE_COMMIT_MESSAGE" > "$1"
 		test -z "$FAKE_COMMIT_AMEND" || echo "$FAKE_COMMIT_AMEND" >> "$1"
+		test -z "$FAKE_MESSAGE_COPY" || cat "$1" >"$FAKE_MESSAGE_COPY"
 		exit
 		;;
 	esac
@@ -47,7 +49,7 @@ set_fake_editor () {
 	action=\&
 	for line in $FAKE_LINES; do
 		case $line in
-		pick|p|squash|s|fixup|f|edit|e|reword|r|drop|d|label|l|reset|r|merge|m)
+		pick|p|amend|a|squash|s|fixup|f|edit|e|reword|r|drop|d|label|l|reset|r|merge|m)
 			action="$line";;
 		exec_*|x_*|break|b)
 			echo "$line" | sed 's/_/ /g' >> "$1";;
