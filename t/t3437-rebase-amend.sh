@@ -39,9 +39,9 @@ test_expect_success 'setup' '
 	test_tick &&
 	git commit --fixup=HEAD -a &&
 	test_tick &&
-	FAKE_COMMIT_AMEND="edited 1" git commit --allow-empty --amend=B &&
+	FAKE_COMMIT_AMEND="edited 1" git commit --amend=B &&
 	test_tick &&
-	FAKE_COMMIT_AMEND="edited 2" git commit --allow-empty --amend=HEAD &&
+	FAKE_COMMIT_AMEND="edited 2" git commit --amend=HEAD &&
 	echo B2>B &&
 	test_tick &&
 	FAKE_COMMIT_AMEND="edited squash" git commit --squash=HEAD -a &&

@@ -108,7 +108,8 @@ static char *edit_message, *use_message;
 static const char *amend_message, *fixup_message, *squash_message;
 static int all, also, interactive, patch_interactive, only, amend, signoff;
 static int edit_flag = -1; /* unspecified */
-static int quiet, verbose, no_verify, allow_empty, dry_run, renew_authorship;
+static int quiet, verbose, no_verify, dry_run, renew_authorship;
+static int allow_empty = -1; /* unspecified */
 static int config_commit_verbose = -1; /* unspecified */
 static int no_post_rewrite, allow_empty_message, pathspec_file_nul;
 static char *untracked_files_arg, *force_date, *ignore_submodule_arg, *ignored_arg;
@@ -1216,6 +1217,12 @@ static int parse_and_validate_options(int argc, const char *argv[],
 	if (0 <= edit_flag)
 		use_editor = edit_flag;
 
+	if (allow_empty < 0) {
+		if (amend_message)
+			allow_empty = 1;
+		else
+			allow_empty = 0;
+	}
 	/* Sanity check options */
 	if (amend && !current_head)
 		die(_("You have nothing to amend."));
