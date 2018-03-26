@@ -1217,22 +1217,37 @@ static int parse_and_validate_options(int argc, const char *argv[],
 	if (0 <= edit_flag)
 		use_editor = edit_flag;
 
-	if (allow_empty < 0) {
+	/* Sanity check options */
+	if (amend) {
+		if (!current_head)
+			die(_("You have nothing to amend."));
+		if (whence != FROM_COMMIT) {
+			if (whence == FROM_MERGE)
+				die(_("You are in the middle of a merge -- "
+				      "cannot amend."));
+			else if (is_from_cherry_pick(whence))
+				die(_("You are in the middle of a cherry-pick "
+				      "-- cannot amend."));
+			else if (whence == FROM_REBASE_PICK)
+				die(_("You are in the middle of a rebase -- "
+				      "cannot amend."));
+		}
+		if (allow_empty < 0) {
+			const char *message, *subject;
+			const char *out_enc = get_commit_output_encoding();
+			message = logmsg_reencode(current_head, NULL, out_enc);
+			if (find_commit_subject(message, &subject) &&
+			    starts_with(subject, "amend! "))
+				allow_empty = 1;
+			else
+				allow_empty = 0;
+			unuse_commit_buffer(current_head, message);
+		}
+	} else if (allow_empty < 0) {
 		if (amend_message)
 			allow_empty = 1;
 		else
 			allow_empty = 0;
-	}
-	/* Sanity check options */
-	if (amend && !current_head)
-		die(_("You have nothing to amend."));
-	if (amend && whence != FROM_COMMIT) {
-		if (whence == FROM_MERGE)
-			die(_("You are in the middle of a merge -- cannot amend."));
-		else if (is_from_cherry_pick(whence))
-			die(_("You are in the middle of a cherry-pick -- cannot amend."));
-		else if (whence == FROM_REBASE_PICK)
-			die(_("You are in the middle of a rebase -- cannot amend."));
 	}
 	if ((fixup_message && squash_message) ||
 	    (amend_message && (fixup_message || squash_message)))
