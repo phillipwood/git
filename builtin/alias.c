@@ -5,10 +5,11 @@
  */
 #include "builtin.h"
 #include "config.h"
+#include "dir.h"
 #include "parse-options.h"
 
 static const char * const alias_usage[] = {
-	N_("git alias <name>"),
+	N_("git alias <name> [<command> [args ...]]"),
 	NULL
 };
 
@@ -23,9 +24,12 @@ static int git_cmd_exists(const char *cmd) {
 	string_list_split(&sl, getenv("PATH"), PATH_SEP, -1);
 	for (i = 0; i < sl.nr; i++) {
 		struct stat st;
-		if (!stat(mkpath("%s/git-%s", sl.items[i].string, cmd), &st) &&
-			  (st.st_mode & S_IXUSR))
-		    break;
+		if (!stat(mkpath("%s/git-%s", sl.items[i].string, cmd), &st)
+#ifndef NO_TRUSTABLE_FILEMODE
+			    && (st.st_mode & S_IXUSR)
+#endif
+		   )
+			break;
 	}
 
 	ret = i < sl.nr;
@@ -48,6 +52,33 @@ static int check_alias(const char *alias)
 		return error(_("'%s' is a git command"), alias);
 
 	return 0;
+}
+
+static char* concatanate_argv(int argc, const char **argv)
+{
+	struct strbuf buf = STRBUF_INIT;
+	const char *c;
+	int shell_alias, i;
+
+	for (c = argv[0]; *c; c++) {
+		if (!isspace(*c))
+			break;
+	}
+	if (!*c)
+		return NULL;
+	shell_alias = *c == '!';
+	argv[0] = c;
+	for (i = 0; i < argc; i++) {
+		for (c = argv[i]; *c; c++) {
+			if (!shell_alias &&
+			    (isspace(*c) || *c == '\\' || *c == '\"'))
+				strbuf_addch(&buf, '\\');
+			strbuf_addch(&buf, *c);
+		}
+		if (i < argc - 1)
+			strbuf_addch(&buf, ' ');
+	}
+	return strbuf_detach(&buf, NULL);
 }
 
 struct alias_data {
@@ -125,6 +156,34 @@ static int find_alias_definition(const char *alias,
 	return ret;
 }
 
+static int set_alias(int argc, const char **argv)
+{
+	const char *alias = argv[0];
+	char *definition = concatanate_argv(--argc, ++argv);
+	const char *origin = NULL;
+	char *file = NULL;
+	struct strbuf key = STRBUF_INIT;
+	int res;
+
+	if (!definition)
+		error(_("alias command is empty"));
+	res = find_alias_definition(alias, NULL, &file, &origin);
+	if (res < 0)
+		return res;
+	else if (res)
+		file = user_config_path();
+	else if (strcmp(origin, "file"))
+		return error(_("cannot change alias set in %s"), origin);
+	if (!file)
+		return error(_("cannot get default config file"));
+	strbuf_addf(&key, "alias.%s", alias);
+	res = git_config_set_in_file_gently(file, key.buf, definition);
+	strbuf_release(&key);
+	free(file);
+
+	return res;
+}
+
 static int get_alias(const char *alias)
 {
 	char *definition;
@@ -152,5 +211,7 @@ int cmd_alias(int argc, const char **argv, const char *prefix)
 			     PARSE_OPT_STOP_AT_NON_OPTION);
 	if (argc == 1)
 		return get_alias(argv[0]);
+	else if (argc > 1)
+		return !!set_alias(argc, argv);
 	usage_with_options(alias_usage, options);
 }
