@@ -7,10 +7,40 @@
 #include "config.h"
 #include "parse-options.h"
 
+enum cmd {
+	CMD_GET,
+	CMD_SET,
+};
+
 static const char * const alias_usage[] = {
-	N_("git alias <name>"),
+	N_("git alias <name> [<command> [args ...]]"),
 	NULL
 };
+
+static char *user_config_file(void)
+{
+	char *file = NULL, *user_config, *xdg_config;
+
+	git_global_config(&user_config, &xdg_config);
+	if (!user_config) {
+		/*
+		 * It is unknown if HOME/.gitconfig exists, so we do
+		 * not know if we should write to XDG location; error
+		 * out even if XDG_CONFIG_HOME is set and points at a
+		 * sane location.
+		 */
+		error(_("$HOME not set"));
+	} else if (access_or_warn(user_config, R_OK, 0) &&
+	    xdg_config && !access_or_warn(xdg_config, R_OK, 0)) {
+		file = xdg_config;
+		free(user_config);
+	} else {
+		file = user_config;
+		free(xdg_config);
+	}
+
+	return file;
+}
 
 static int git_cmd_exists(const char *cmd) {
 	struct string_list sl = STRING_LIST_INIT_DUP;
@@ -46,6 +76,45 @@ static int check_alias_name(const char *alias)
 		return error(_("'%s' is a git command"), alias);
 
 	return 0;
+}
+
+static char* concatanate_argv(int argc, const char **argv)
+{
+	struct strbuf buf = STRBUF_INIT;
+	const char *c;
+
+	for (c = argv[0]; *c; c++) {
+		if (!isspace(*c))
+			break;
+	}
+	if (!*c) {
+		error(_("alias definition is empty"));
+		return NULL;
+	}
+	if (*c == '!') {
+		if (argc > 1) {
+			error(_("too many arguments for shell alias"));
+			return NULL;
+		}
+		return xstrdup(c);
+	}
+	argv[0] = c;
+	for (int i = 0; i < argc; i++) {
+		int quote = !!argv[i][strcspn(argv[i], " \t\r\n")];
+
+		if (i)
+			strbuf_addch(&buf, ' ');
+		if (quote)
+			strbuf_addch(&buf, '"');
+		for (c = argv[i]; *c; c++) {
+			if (*c == '\\' || *c == '"')
+				strbuf_addch(&buf, '\\');
+			strbuf_addch(&buf, *c);
+		}
+		if (quote)
+			strbuf_addch(&buf, '"');
+	}
+	return strbuf_detach(&buf, NULL);
 }
 
 struct alias_data {
@@ -128,6 +197,64 @@ out:
 	return res;
 }
 
+static int update_alias(int argc, const char **argv, enum cmd cmd)
+{
+	int res;
+	const char *alias = argv[0];
+	const char *origin;
+	char *file;
+	char *old_definition, *new_definition = NULL;
+	struct strbuf key = STRBUF_INIT;
+
+	argc--;
+	argv++;
+	res = find_alias_definition(alias, &old_definition, &file, &origin);
+	if (res < 0) {
+		goto out;
+	} else if (res) {
+		file = user_config_file();
+		if (!file)
+			goto out;
+	} else if (strcmp(origin, "file")) {
+		res = error(_("cannot change alias set in %s"), origin);
+		goto out;
+	}
+
+	switch(cmd) {
+	case CMD_SET:
+		new_definition = concatanate_argv(argc, argv);
+		if (!new_definition) {
+			res = -1;
+			goto out;
+		}
+		break;
+
+	default:
+		BUG("unknown command");
+	}
+
+	strbuf_addf(&key, "alias.%s", alias);
+	res = git_config_set_in_file_gently(file, key.buf, new_definition);
+	strbuf_release(&key);
+	if (res) {
+		if (old_definition)
+			error(_("could not update alias"));
+		else
+			error(_("could not create alias"));
+	} else {
+		if (old_definition)
+			printf(_("updated alias '%s'\n"), alias);
+		else
+			printf(_("created alias '%s'\n"), alias);
+	}
+out:
+	free(old_definition);
+	free(new_definition);
+	free(file);
+
+	return res;
+}
+
 static int get_alias(const char *alias)
 {
 	char *definition;
@@ -149,13 +276,19 @@ out:
 
 int cmd_alias(int argc, const char **argv, const char *prefix)
 {
+	enum cmd cmd = CMD_GET;
+
 	struct option options[] = {
 		OPT_END()
 	};
 
 	argc = parse_options(argc, argv, prefix, options, alias_usage,
 			     PARSE_OPT_STOP_AT_NON_OPTION);
-	if (argc == 1)
+	if (argc == 1) {
 		return !!get_alias(argv[0]);
+	} else if (argc > 1) {
+		cmd = CMD_SET;
+		return !!update_alias(argc, argv, cmd);
+	}
 	usage_with_options(alias_usage, options);
 }
