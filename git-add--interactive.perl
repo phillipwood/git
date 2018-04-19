@@ -1015,12 +1015,16 @@ sub color_diff {
 
 use constant {
 	NO_NEWLINE => 1,
+	LAST_ADD_DEL => 2,
+	FIRST_ADD => 4
 };
 
 sub label_hunk_lines {
 	my $hunk = shift;
 	my $text = $hunk->{TEXT};
-	my (@line_flags, @lines);
+	# A block contains the insertions and deletions occurring context
+	# lines.
+	my (@blocks, @line_flags, @lines, @modes);
 	my ($block, $label, $last_mode) = (0, 0, '');
 	for my $line (1..$#{$text}) {
 		$line_flags[$line] = 0;
@@ -1028,13 +1032,30 @@ sub label_hunk_lines {
 		if ($mode eq '\\') {
 			$line_flags[$line - 1] |= NO_NEWLINE;
 		}
-		if ($mode eq '-' or $mode eq '+') {
-			$lines[++$label] = $line;
+		if ($mode ne '-' and $last_mode eq '-' or
+		    $mode ne '+' and $last_mode eq '+') {
+			$line_flags[$line - 1] |= LAST_ADD_DEL;
 		}
+		if ($mode eq '+' and $last_mode ne '+') {
+			$line_flags[$line] |= FIRST_ADD;
+		}
+		if ($mode eq '-' or $mode eq '+') {
+			$blocks[++$label] = $block;
+			$lines[$label] = $line;
+			$modes[$label] = $mode;
+		} elsif ($mode eq ' ' and $last_mode ne ' ') {
+			$block++;
+		}
+		$last_mode = $mode;
+	}
+	if ($last_mode eq '-' or $last_mode eq '+') {
+		$line_flags[-1] |= LAST_ADD_DEL;
 	}
 	if ($label > 1) {
 		$hunk->{LABELS} = {
+			BLOCKS => \@blocks,
 			LINES => \@lines,
+			MODES => \@modes
 		};
 		$hunk->{LINE_FLAGS} = \@line_flags;
 		return 1;
@@ -1061,11 +1082,14 @@ sub select_hunk_lines {
 		}
 	};
 
-	my ($lo, $hi) = splice(@$selected, 0, 2);
+	my ($lo, $hi, $pre_insert, $post_insert) = splice(@$selected, 0, 4);
 	# Lines with this mode will become context lines if they are
 	# not selected
 	my $context_mode = $patch_mode_flavour{IS_REVERSE} ? '+' : '-';
 	for $i (1..$#{$text}) {
+		if ($i == $lo and defined($pre_insert)) {
+			$select_lines->(@$pre_insert);
+		}
 		if ($lo <= $i and $i <= $hi) {
 			$select_lines->($i);
 		} else {
@@ -1080,8 +1104,12 @@ sub select_hunk_lines {
 			}
 		}
 		if ($i == $hi) {
+			if (defined($post_insert)) {
+				$select_lines->(@$post_insert);
+			}
 			if (@$selected) {
-				($lo, $hi) = splice(@$selected, 0, 2);
+				($lo, $hi, $pre_insert, $post_insert) =
+						splice(@$selected, 0, 4);
 			}
 		}
 	}
@@ -1102,6 +1130,108 @@ sub select_hunk_lines {
 		$newhunk->{OFS_DELTA} += $hunk->{OFS_DELTA};
 	}
 	return $newhunk;
+}
+
+sub pair_hunk_selection {
+	my $line_flags = shift;
+	my @ret;
+	my $reverse = $patch_mode_flavour{IS_REVERSE};
+	for my $sel (@_) {
+		my $i = 0;
+		my ($del, $add) = @$sel;
+		my $ndel = @$del / 2;
+		my $nadd = @$add / 2;
+		# If there the same number of insertion and deletion
+		# groups then pair up in insertions and deletions.
+		if ($nadd == $ndel) {
+			while ($i < @{$del}) {
+				my ($ra, $rb) = $reverse ? ($add, $del) :
+							   ($del, $add);
+				my ($starta, $enda) = @{$ra}[$i, $i + 1];
+				my ($startb, $endb) = @{$rb}[$i, $i + 1];
+				if ($line_flags->[$enda] & LAST_ADD_DEL and
+				    $line_flags->[$endb] & NO_NEWLINE) {
+					$endb++;
+				}
+				if ($line_flags->[$enda] & NO_NEWLINE) {
+					$enda++;
+				}
+				push @ret, $reverse ?
+					($starta, $enda,
+					 [ $startb..$endb ], undef) :
+					($starta, $enda,
+					 undef, [ $startb..$endb ]);
+				$i += 2;
+			}
+		# If there are only deletions or only insertions or
+		# a) we're adding to the index and there is a single group
+		#    of insertions starting at the first inserted line
+		# or
+		# b) we're resetting the index and there is a single group
+		#    of deletions finishing with the last deleted line
+		# then it is okay just to have deletions followed by
+		# insertions.
+		} elsif (!$nadd or !$ndel or
+			 (!$reverse and $ndel == 1 and
+			  $line_flags->[$del->[1]] & LAST_ADD_DEL) or
+			 ($reverse and $nadd == 1 and
+			  $line_flags->[$add->[0]] & FIRST_ADD)) {
+			while ($i < @$del) {
+				my ($start, $end) = @{$del}[$i, $i + 1];
+				if ($line_flags->[$end] & NO_NEWLINE) {
+					$end++;
+				}
+				push @ret, $start, $end, undef, undef;
+				$i += 2;
+			}
+			$i = 0;
+			while ($i < @$add) {
+				my ($start, $end) = @{$add}[$i, $i + 1];
+				if ($line_flags->[$end] & NO_NEWLINE) {
+					$end++;
+				}
+				push @ret, $start, $end, undef, undef;
+				$i += 2;
+			}
+		} else {
+			printf STDERR __("unable to pair up insertions and deletions\n");
+			return undef;
+		}
+	}
+	return \@ret;
+}
+
+sub process_hunk_selection {
+	my ($labels, $line_flags) = @{shift()}{qw(LABELS LINE_FLAGS)};
+	my ($blocks, $lines, $modes) =
+				@{$labels}{qw(BLOCKS LINES MODES)};
+	my @selection = sort { $a <=> $b } @_;
+	unless (@selection) {
+		return [];
+	}
+	my $last_label = shift @selection;
+	my ($last_block, $last_line, $last_mode) =
+	    ($blocks->[$last_label], $lines->[$last_label], $modes->[$last_label]);
+	my ($del, $add) = ([], []);
+	push @{$last_mode eq '-' ? $del : $add}, $last_line;
+	my @sel;
+	for my $label (@selection) {
+		my ($block, $line, $mode) =
+			($blocks->[$label], $lines->[$label], $modes->[$label]);
+		if ($block != $last_block) {
+			push @{$last_mode eq '-' ? $del : $add}, $last_line;
+			push @sel, [ $del, $add ];
+			($del, $add) = ([], []);
+			push @{$mode eq '-' ? $del : $add}, $line;
+		} elsif ($line != $last_line + 1 or $mode ne $last_mode) {
+			push @{$last_mode eq '-' ? $del : $add}, $last_line;
+			push @{$mode eq '-' ? $del : $add}, $line;
+		}
+		($last_block, $last_line, $last_mode) = ($block, $line, $mode);
+	}
+	push @{$last_mode eq '-' ? $del : $add}, $last_line;
+	push @sel, [ $del, $add ];
+	pair_hunk_selection($line_flags, @sel);
 }
 
 sub check_hunk_label {
@@ -1138,14 +1268,7 @@ sub parse_hunk_selection {
 			return undef;
 		}
 	}
-	[ map {
-		my $line = $lines->[$_];
-		if ($hunk->{LINE_FLAGS}->[$line] & NO_NEWLINE) {
-			($line, $line + 1);
-		} else {
-			($line, $line);
-		}
-	} sort { $a <=> $b } keys(%selected) ];
+	return process_hunk_selection($hunk, keys(%selected));
 }
 
 sub display_hunk_lines {

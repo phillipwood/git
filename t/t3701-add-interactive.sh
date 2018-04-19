@@ -489,9 +489,115 @@ test_expect_success 'setup expected diff' '
 	EOF
 '
 
-test_expect_failure 'can stage modified lines of patch (1)' '
+test_expect_success 'can stage modified lines of patch (1)' '
 	git reset &&
 	printf "%s\n" l "1,3 7-9 12" |
+	EDITOR=: git add -p 2>error &&
+	test_must_be_empty error &&
+	git diff --cached HEAD >actual &&
+	diff_cmp expected actual
+'
+
+test_expect_success 'setup expected diff' '
+	cat >expected <<-\EOF
+	diff --git a/test b/test
+	index 0889435..cc6163b 100644
+	--- a/test
+	+++ b/test
+	@@ -1,6 +1,7 @@
+	 10
+	-20
+	+twenty
+	+thirty
+	 30
+	 40
+	 50
+	-60
+	+sixty
+	\ No newline at end of file
+	EOF
+'
+
+test_expect_success 'can stage modified lines of patch (2)' '
+	git reset &&
+	printf "%s\n" l "2,6,8,9,12" |
+	EDITOR=: git add -p 2>error &&
+	test_must_be_empty error &&
+	git diff --cached HEAD >actual &&
+	diff_cmp expected actual
+'
+
+test_expect_success 'setup HEAD' '
+	git reset &&
+	git apply --cached <<-\EOF &&
+	diff --git a/test b/test
+	--- a/test
+	+++ b/test
+	@@ -3,4 +3,4 @@
+	 30
+	 40
+	 50
+	-60
+	+60
+	\ No newline at end of file
+	EOF
+	git commit
+'
+
+test_expect_success 'setup expected diff' '
+	cat >expected <<-\EOF
+	diff --git a/test b/test
+	index 0889435..cc6163b 100644
+	--- a/test
+	+++ b/test
+	@@ -1,6 +1,8 @@
+	-10
+	+ten
+	+twenty
+	+thirty
+	 20
+	-30
+	+fifty
+	 40
+	 50
+	 60
+	\ No newline at end of file
+	EOF
+'
+
+test_expect_success 'can stage modified lines of patch (3)' '
+	git reset &&
+	printf "%s\n" l "11,1,3 7-9" |
+	EDITOR=: git add -p 2>error &&
+	test_must_be_empty error &&
+	git diff --cached HEAD >actual &&
+	diff_cmp expected actual
+'
+
+test_expect_success 'setup expected diff' '
+	cat >expected <<-\EOF
+	diff --git a/test b/test
+	index 0889435..cc6163b 100644
+	--- a/test
+	+++ b/test
+	@@ -1,6 +1,8 @@
+	-10
+	+ten
+	+twenty
+	+thirty
+	 20
+	 30
+	 40
+	 50
+	-60
+	\ No newline at end of file
+	+fifty
+	EOF
+'
+
+test_expect_success 'can stage modified lines of patch (4)' '
+	git reset &&
+	printf "%s\n" l "9-6 11,1" |
 	EDITOR=: git add -p 2>error &&
 	test_must_be_empty error &&
 	git diff --cached HEAD >actual &&
