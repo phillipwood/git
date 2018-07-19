@@ -1680,15 +1680,38 @@ static int is_pick_or_similar(enum todo_command command)
 	}
 }
 
+static size_t subject_length(const char *body)
+{
+	size_t i, len = 0;
+	char c;
+	int blank_line = 1;
+	for (i = 0, c = body[i]; c; c = body[++i]) {
+		if (c == '\n') {
+			if (blank_line)
+				return len;
+			len = i + 1;
+			blank_line = 1;
+		} else if (!isspace(c)) {
+			blank_line = 0;
+		}
+	}
+	return blank_line ? len : i;
+}
+
 static void append_squash_message(struct strbuf *buf, const char *body,
 				  struct replay_opts *opts)
 {
+	size_t commented_len = 0;
+
 	unlink(rebase_path_fixup_msg());
+	if (starts_with(body, "squash!") || starts_with(body, "fixup!"))
+		commented_len = subject_length(body);
 	strbuf_addf(buf, "\n%c ", comment_line_char);
 	strbuf_addf(buf, _("This is the commit message #%d:"),
 		    ++opts->current_fixup_count + 1);
 	strbuf_addstr(buf, "\n\n");
-	strbuf_addstr(buf, body);
+	strbuf_add_commented_lines(buf, body, commented_len);
+	strbuf_addstr(buf, body + commented_len);
 }
 
 static int update_squash_messages(struct repository *r,
