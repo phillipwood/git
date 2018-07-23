@@ -1,0 +1,5 @@
+-      "|[-+0-9.e]+[fFlL]?|0[xXbB]?[0-9a-fA-F]+[lLuU]*"
++      "|[-+0-9.eE]+[fFlL]?|0[xX][-+0-9a-fA-F.pP]+[fFlL]?"
+
+I wonder if this would be better as
++      "|(0[xX)]?[-+0-9a-fA-F.eEpP]+[fFlL]?"
