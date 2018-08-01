@@ -1,0 +1,5 @@
+changes since v2:
+
+ - Improved commit message
+ - Fixed memory leak
+ - Translated a couple of error messages
