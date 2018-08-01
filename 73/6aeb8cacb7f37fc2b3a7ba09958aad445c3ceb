@@ -1,0 +1,5 @@
+Changes since v2:
+
+ - Changed the way it detects and handles broken quoting when git
+   is upgraded while rebase is stopped
+ - Fixed an existing memory leak
