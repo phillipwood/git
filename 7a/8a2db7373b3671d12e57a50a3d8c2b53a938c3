@@ -3,3 +3,26 @@ changes since v2:
  - Improved commit message
  - Fixed memory leak
  - Translated a couple of error messages
+
+Changes since v2:
+
+ - Changed the way it detects and handles broken quoting when git
+   is upgraded while rebase is stopped. This means that the fix for
+   quoting is no longer tied to the fix for the trailing "'" on the
+   GIT_AUTHOR_DATE line. It now also fixes broken quoting in
+   read_author_ident() which would error out with the last version.
+ - Changed the tests for authors that contain "'". If sq_dequote() and
+   parse the author script then the shell should be able to and the
+   most important thing is to check that the author in the new commit
+   is correct.
+ - Fixed an existing memory leak
+
+Note Eric expressed concerns about using a version number, but I had
+already written this code so I thought I send it and see how people
+felt about the additionally complexity. I like the fact that it
+decouple the quoting fix from Eric's patches. In the end the extra
+code is just reading an integer from a text file. The test for adding
+the trailing quote to the author script is quite strict can be
+defeated by a badly edited author script but hopefully that is
+unlikely as it is only invoked if git got upgraded while rebase was
+stopped.
