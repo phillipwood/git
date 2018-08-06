@@ -1,5 +1,3 @@
-changes since v2:
+changes since v3:
 
- - Improved commit message
- - Fixed memory leak
- - Translated a couple of error messages
+ - Implemented the simpler scheme suggested by Eric
