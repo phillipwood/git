@@ -1,4 +1,4 @@
-Changes since v3:
+changes since v3:
 
  - Reverted the implementation to v2 with more robust detection of the
    missing "'" on the last line of the author script based on a
