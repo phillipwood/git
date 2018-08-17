@@ -1301,10 +1301,14 @@ sub split_hunk_selection {
 	return @ret;
 }
 
+sub get_max_label {
+	my $hunk = shift;
+	$#{$hunk->{LABELS}->{LINES}}
+}
+
 sub parse_hunk_selection {
 	my ($hunk, $line) = @_;
-	my $lines = $hunk->{LABELS}->{LINES};
-	my $max_label = $#{$lines};
+	my $max_label = get_max_label($hunk);
 	my $invert = undef;
 	my %selected;
 	my @fields = split(/[,\s]+/, $line);
@@ -1354,7 +1358,7 @@ sub parse_hunk_selection {
 sub display_hunk_lines {
 	my $hunk = shift;
 	my ($display, $lines) = ($hunk->{DISPLAY}, $hunk->{LABELS}->{LINES});
-	my $max_label = $#{$lines};
+	my $max_label = get_max_label($hunk);
 	my $width = int(log($max_label) / log(10)) + 1;
 	my $padding = ' ' x ($width + 1);
 	my $label = 1;
@@ -1368,15 +1372,50 @@ sub display_hunk_lines {
 	}
 }
 
+sub select_lines_help {
+	my $max_label = shift;
+	if ($max_label > 10) {
+		print colored $help_color, __ <<'EOF' ;
+Selection help:
+10         - select a single line
+3-5        - select a range of lines
+1,3-5,7-9  - select multiple lines and ranges
+^          - invert selection
+q          - select nothing
+	   - (empty) select nothing
+EOF
+    } else {
+		print colored $help_color, __ <<'EOF' ;
+Selection help:
+1          - select a single line
+3-5        - select a range of lines
+236-9      - select multiple lines and ranges
+^          - invert selection
+q          - select nothing
+	   - (empty) select nothing
+EOF
+	}
+}
+
 sub select_lines_loop {
 	my $hunk = shift;
 	display_hunk_lines($hunk);
 	my $selection = undef;
 	until (defined $selection) {
-		print colored $prompt_color, __("select lines? ");
+		my $max_label = get_max_label($hunk);
+		my $help = "[1-$max_label,-,^,";
+		$help .=  "','," if ($max_label > 9);
+		$help .= "?]? ";
+		print colored $prompt_color, __("select lines") . " $help";
 		my $text = <STDIN>;
-		defined $text and $text =~ /\S/ or return undef;
-		$selection = parse_hunk_selection($hunk, $text);
+		defined $text or return undef;
+		if ($text =~ /^\s*(?:$|q)/) {
+			return undef;
+		} elsif ($text =~ /^\s*\?/) {
+			select_lines_help($max_label);
+		} else {
+			$selection = parse_hunk_selection($hunk, $text);
+		}
 	}
 	return select_hunk_lines($hunk, $selection);
 }
