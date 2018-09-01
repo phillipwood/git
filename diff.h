@@ -219,6 +219,7 @@ struct diff_options {
 
 	/* XDF_WHITESPACE_FLAGS regarding block detection are set at 2, 3, 4 */
 	#define COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE (1<<5)
+	#define COLOR_MOVED_WS_ALLOW_MIXED_INDENTATION_CHANGE (1<<6)
 	int color_moved_ws_handling;
 };
 

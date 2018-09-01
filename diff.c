@@ -311,7 +311,11 @@ static int parse_color_moved_ws(const char *arg)
 		else if (!strcmp(sb.buf, "ignore-all-space"))
 			ret |= XDF_IGNORE_WHITESPACE;
 		else if (!strcmp(sb.buf, "allow-indentation-change"))
-			ret |= COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE;
+			ret = COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE |
+			 (ret & ~COLOR_MOVED_WS_ALLOW_MIXED_INDENTATION_CHANGE);
+		else if (!strcmp(sb.buf, "allow-mixed-indentation-change"))
+			ret = COLOR_MOVED_WS_ALLOW_MIXED_INDENTATION_CHANGE |
+			 (ret & ~COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE);
 		else
 			error(_("ignoring unknown color-moved-ws mode '%s'"), sb.buf);
 
@@ -321,6 +325,9 @@ static int parse_color_moved_ws(const char *arg)
 	if ((ret & COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE) &&
 	    (ret & XDF_WHITESPACE_FLAGS))
 		die(_("color-moved-ws: allow-indentation-change cannot be combined with other white space modes"));
+	else if ((ret & COLOR_MOVED_WS_ALLOW_MIXED_INDENTATION_CHANGE) &&
+		 (ret & XDF_WHITESPACE_FLAGS))
+		die(_("color-moved-ws: allow-mixed-indentation-change cannot be combined with other white space modes"));
 
 	string_list_clear(&l, 0);
 
@@ -776,10 +783,56 @@ struct moved_entry {
  * comparision is longer than the second.
  */
 struct ws_delta {
-	char *string;
+	union {
+		int delta;
+		char *string;
+	};
 	unsigned int current_longer : 1;
+	unsigned int have_string : 1;
 };
 #define WS_DELTA_INIT { NULL, 0 }
+
+static int compute_mixed_ws_delta(const struct emitted_diff_symbol *a,
+				  const struct emitted_diff_symbol *b,
+				  int *delta)
+{
+	unsigned int i = 0, j = 0;
+	int la, lb;
+	const char *sa = a->line;
+	const char *sb = b->line;
+
+	/* skip any \v \f \r at start of indentation */
+	while (sa[i] == '\f' || sa[i] == '\v' ||
+	       (sa[i] == '\r' && i < a->len - 1))
+		i++;
+	while (sb[j] == '\f' || sb[j] == '\v' ||
+	       (sb[j] == '\r' && j < b->len - 1))
+		j++;
+
+	for (la = 0; ; i++) {
+		if (sa[i] == ' ')
+			la++;
+		else if (sa[i] == '\t')
+			la = (la + 8) & ~7;
+		else
+			break;
+	}
+	for (lb = 0; ; j++) {
+		if (sb[j] == ' ')
+			lb++;
+		else if (sb[j] == '\t')
+			lb = (lb + 8) & ~7;
+		else
+			break;
+	}
+	if (a->s == DIFF_SYMBOL_PLUS)
+		*delta = la - lb;
+	else
+		*delta = lb - la;
+
+	return (a->len - i == b->len - j) &&
+		!memcmp(sa + i, sb + j, a->len - i);
+}
 
 static int compute_ws_delta(const struct emitted_diff_symbol *a,
 			     const struct emitted_diff_symbol *b,
@@ -791,6 +844,7 @@ static int compute_ws_delta(const struct emitted_diff_symbol *a,
 
 	out->string = xmemdupz(longer->line, d);
 	out->current_longer = (a == longer);
+	out->have_string = 1;
 
 	return !strncmp(longer->line + d, shorter->line, shorter->len);
 }
@@ -833,15 +887,28 @@ static int cmp_in_block_with_wsd(const struct diff_options *o,
 	 * To do so we need to compare 'l' to 'cur', adjusting the
 	 * one of them for the white spaces, depending which was longer.
 	 */
+	if (o->color_moved_ws_handling &
+	    COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE) {
+		wslen = strlen(pmb->wsd->string);
+		if (pmb->wsd->current_longer)
+			c += wslen;
+		else
+			a += wslen;
 
-	wslen = strlen(pmb->wsd->string);
-	if (pmb->wsd->current_longer)
-		c += wslen;
-	else
-		a += wslen;
+		if (strcmp(a, c))
+			return 1;
 
-	if (strcmp(a, c))
-		return 1;
+		return 0;
+	} else if (o->color_moved_ws_handling &
+		   COLOR_MOVED_WS_ALLOW_MIXED_INDENTATION_CHANGE) {
+		int delta;
+
+		if (!compute_mixed_ws_delta(cur->es, l, &delta))
+		    return 1;
+		return delta != pmb->wsd->delta;
+	} else {
+		BUG("no color_moved_ws_allow_indentation_change set");
+	}
 
 	return 0;
 }
@@ -858,7 +925,8 @@ static int moved_entry_cmp(const void *hashmap_cmp_fn_data,
 			 & XDF_WHITESPACE_FLAGS;
 
 	if (diffopt->color_moved_ws_handling &
-	    COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE)
+	    (COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE |
+	     COLOR_MOVED_WS_ALLOW_MIXED_INDENTATION_CHANGE))
 		/*
 		 * As there is not specific white space config given,
 		 * we'd need to check for a new block, so ignore all
@@ -966,7 +1034,8 @@ static void pmb_advance_or_null_multi_match(struct diff_options *o,
 			pmb[i] = pmb[i]->next_line;
 		} else {
 			if (pmb[i]->wsd) {
-				free(pmb[i]->wsd->string);
+				if (pmb[i]->wsd->have_string)
+					free(pmb[i]->wsd->string);
 				FREE_AND_NULL(pmb[i]->wsd);
 			}
 			pmb[i] = NULL;
@@ -1079,7 +1148,8 @@ static void mark_color_as_moved(struct diff_options *o,
 			continue;
 
 		if (o->color_moved_ws_handling &
-		    COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE)
+		    (COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE |
+		     COLOR_MOVED_WS_ALLOW_MIXED_INDENTATION_CHANGE))
 			pmb_advance_or_null_multi_match(o, match, hm, pmb, pmb_nr, n);
 		else
 			pmb_advance_or_null(o, match, hm, pmb, pmb_nr);
@@ -1101,6 +1171,17 @@ static void mark_color_as_moved(struct diff_options *o,
 						pmb[pmb_nr++] = match;
 					} else
 						free(wsd);
+				} else if (o->color_moved_ws_handling &
+					   COLOR_MOVED_WS_ALLOW_MIXED_INDENTATION_CHANGE) {
+					int delta;
+
+					if (compute_mixed_ws_delta(l, match->es, &delta)) {
+						struct ws_delta *wsd = xmalloc(sizeof(*match->wsd));
+						wsd->delta = delta;
+						wsd->have_string = 0;
+						match->wsd = wsd;
+						pmb[pmb_nr++] = match;
+					}
 				} else {
 					pmb[pmb_nr++] = match;
 				}
@@ -5805,7 +5886,8 @@ static void diff_flush_patch_all_file_pairs(struct diff_options *o)
 			struct hashmap add_lines, del_lines;
 
 			if (o->color_moved_ws_handling &
-			    COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE)
+			    (COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE |
+			     COLOR_MOVED_WS_ALLOW_MIXED_INDENTATION_CHANGE))
 				o->color_moved_ws_handling |= XDF_IGNORE_WHITESPACE;
 
 			hashmap_init(&del_lines, moved_entry_cmp, o, 0);
