@@ -802,7 +802,6 @@ static int cmp_in_block_with_wsd(const struct diff_options *o,
 				 int n)
 {
 	struct emitted_diff_symbol *l = &o->emitted_symbols->buf[n];
-	int al = cur->es->len, cl = l->len;
 	const char *a = cur->es->line,
 		   *b = match->es->line,
 		   *c = l->line;
@@ -836,13 +835,10 @@ static int cmp_in_block_with_wsd(const struct diff_options *o,
 	 */
 
 	wslen = strlen(pmb->wsd->string);
-	if (pmb->wsd->current_longer) {
+	if (pmb->wsd->current_longer)
 		c += wslen;
-		cl -= wslen;
-	} else {
+	else
 		a += wslen;
-		al -= wslen;
-	}
 
 	if (strcmp(a, c))
 		return 1;
