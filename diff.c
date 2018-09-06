@@ -293,6 +293,16 @@ static int parse_color_moved(const char *arg)
 
 static int parse_color_moved_ws(const char *arg)
 {
+	struct {
+		int flag;
+		const char *name;
+	} flags[] = {
+		{ XDF_IGNORE_WHITESPACE_CHANGE, "ignore-space-change" },
+		{ XDF_IGNORE_WHITESPACE_AT_EOL, "ignore-space-at-eol" },
+		{ XDF_IGNORE_WHITESPACE, "ignore-all-space" },
+		{ COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE, "allow-indentation-change" },
+		{ COLOR_MOVED_WS_ALLOW_MIXED_INDENTATION_CHANGE, "allow-mixed-indentation-change" }
+	};
 	int ret = 0;
 	struct string_list l = STRING_LIST_INIT_DUP;
 	struct string_list_item *i;
@@ -300,24 +310,30 @@ static int parse_color_moved_ws(const char *arg)
 	string_list_split(&l, arg, ',', -1);
 
 	for_each_string_list_item(i, &l) {
+		int index = -1, j;
 		struct strbuf sb = STRBUF_INIT;
 		strbuf_addstr(&sb, i->string);
 		strbuf_trim(&sb);
 
-		if (!strcmp(sb.buf, "ignore-space-change"))
-			ret |= XDF_IGNORE_WHITESPACE_CHANGE;
-		else if (!strcmp(sb.buf, "ignore-space-at-eol"))
-			ret |= XDF_IGNORE_WHITESPACE_AT_EOL;
-		else if (!strcmp(sb.buf, "ignore-all-space"))
-			ret |= XDF_IGNORE_WHITESPACE;
-		else if (!strcmp(sb.buf, "allow-indentation-change"))
-			ret = COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE |
-			 (ret & ~COLOR_MOVED_WS_ALLOW_MIXED_INDENTATION_CHANGE);
-		else if (!strcmp(sb.buf, "allow-mixed-indentation-change"))
-			ret = COLOR_MOVED_WS_ALLOW_MIXED_INDENTATION_CHANGE |
-			 (ret & ~COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE);
-		else
+		for (j = 0; j < ARRAY_SIZE(flags); j++) {
+			if (starts_with(flags[j].name, sb.buf)) {
+				if (index > -1)
+					error(_("ambiguous abbreviation '%s' could be '%s' or '%s'"),
+					      sb.buf, flags[index].name,
+					      flags[j].name);
+				index = j;
+			}
+		}
+		if (index == -1)
 			error(_("ignoring unknown color-moved-ws mode '%s'"), sb.buf);
+		if (flags[index].flag == COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE)
+			ret = COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE |
+				(ret & ~COLOR_MOVED_WS_ALLOW_MIXED_INDENTATION_CHANGE);
+		else if (flags[index].flag == COLOR_MOVED_WS_ALLOW_MIXED_INDENTATION_CHANGE)
+			ret = COLOR_MOVED_WS_ALLOW_MIXED_INDENTATION_CHANGE |
+				(ret & ~COLOR_MOVED_WS_ALLOW_INDENTATION_CHANGE);
+		else
+			ret |= flags[index].flag;
 
 		strbuf_release(&sb);
 	}
