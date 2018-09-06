@@ -1,0 +1,4 @@
+Changes since v3:
+
+ - reverted to v2 with Eric's suggestion to make the check for the
+   missing "'" at the end of the GIT_AUTHOR_SCRIPT line more robust.
