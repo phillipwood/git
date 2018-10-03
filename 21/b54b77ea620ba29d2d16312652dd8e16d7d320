@@ -2,3 +2,6 @@ This applies on top of fab01ec52e ("diff: fix
 --color-moved-ws=allow-indentation-change", 2018-09-04). Note that the
 crash happens with or without that patch, but the mechanism is
 slightly different without it.
+
+Changes since v1:
+ - updated comments to match new implementation.
