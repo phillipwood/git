@@ -4485,27 +4485,6 @@ void todo_list_transform(struct todo_list *todo_list, unsigned flags)
 		BUG("unusable todo list");
 }
 
-int transform_todo_file(unsigned flags)
-{
-	const char *todo_file = rebase_path_todo();
-	struct todo_list todo_list = TODO_LIST_INIT;
-	int res;
-
-	if (strbuf_read_file(&todo_list.buf, todo_file, 0) < 0)
-		return error(_("could not read '%s'."), todo_file);
-
-	if (todo_list_parse_insn_buffer(todo_list.buf.buf, &todo_list)) {
-		todo_list_release(&todo_list);
-		return error(_("unusable todo list: '%s'"), todo_file);
-	}
-
-	todo_list_transform(&todo_list, flags);
-
-	res = write_message(todo_list.buf.buf, todo_list.buf.len, todo_file, 0);
-	todo_list_release(&todo_list);
-	return res;
-}
-
 int check_todo_list_from_file(void)
 {
 	struct todo_list old_todo = TODO_LIST_INIT, new_todo = TODO_LIST_INIT;
