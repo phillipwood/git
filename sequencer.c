@@ -4636,12 +4636,8 @@ int complete_action(struct replay_opts *opts, unsigned flags,
 
 	todo_list_transform(todo_list, flags | TODO_LIST_SHORTEN_IDS);
 
-	strbuf_addch(buf, '\n');
-	strbuf_commented_addf(buf, Q_("Rebase %s onto %s (%d command)",
-				      "Rebase %s onto %s (%d commands)",
-				      command_count),
-			      shortrevisions, shortonto, command_count);
-	append_todo_help(0, flags & TODO_LIST_KEEP_EMPTY, buf);
+	append_todo_help(flags & TODO_LIST_KEEP_EMPTY, command_count,
+			 shortrevisions, shortonto, buf);
 
 	if (write_message(buf->buf, buf->len, todo_file, 0))
 		return error_errno(_("could not write '%s'"), todo_file);
