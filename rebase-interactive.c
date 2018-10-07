@@ -86,39 +86,40 @@ void append_todo_help(unsigned keep_empty, int command_count,
 	}
 }
 
-int edit_todo_list(unsigned flags)
+int edit_todo_list(struct todo_list *todo_list, struct todo_list *new_todo,
+		   unsigned flags, int command_count,
+		   const char *shortrevisions, const char *shortonto)
 {
 	const char *todo_file = rebase_path_todo();
-	struct todo_list todo_list = TODO_LIST_INIT;
-	int res = 0;
+	unsigned initial = shortrevisions && shortonto;
 
-	if (strbuf_read_file(&todo_list.buf, todo_file, 0) < 0)
-		return error_errno(_("could not read '%s'."), todo_file);
+	if (initial || !todo_list_parse_insn_buffer(todo_list->buf.buf, todo_list))
+		todo_list_transform(todo_list, flags | TODO_LIST_SHORTEN_IDS);
 
-	strbuf_stripspace(&todo_list.buf, 1);
-	if (!todo_list_parse_insn_buffer(todo_list.buf.buf, &todo_list))
-		todo_list_transform(&todo_list, flags | TODO_LIST_SHORTEN_IDS);
+	if (initial)
+		append_todo_help(flags & TODO_LIST_KEEP_EMPTY, command_count,
+				 shortrevisions, shortonto, &todo_list->buf);
+	else
+		append_todo_help(flags, 0, NULL, NULL, &todo_list->buf);
 
-	append_todo_help(flags, 0, NULL, NULL, &todo_list.buf);
+	if (write_message(todo_list->buf.buf, todo_list->buf.len, todo_file, 0))
+		return error_errno(_("could not write '%s''"), todo_file);
 
-	if (write_message(todo_list.buf.buf, todo_list.buf.len, todo_file, 0)) {
-		todo_list_release(&todo_list);
-		return -1;
-	}
+	if (initial && copy_file(rebase_path_todo_backup(), todo_file, 0666))
+		return error(_("could not copy '%s' to '%s'."), todo_file,
+			     rebase_path_todo_backup());
 
-	strbuf_reset(&todo_list.buf);
-	if (launch_sequence_editor(todo_file, &todo_list.buf, NULL)) {
-		todo_list_release(&todo_list);
-		return -1;
-	}
+	if (launch_sequence_editor(todo_file, &new_todo->buf, NULL))
+		return -2;
 
-	if (!todo_list_parse_insn_buffer(todo_list.buf.buf, &todo_list)) {
-		todo_list_transform(&todo_list, flags & ~(TODO_LIST_SHORTEN_IDS));
-		res = write_message(todo_list.buf.buf, todo_list.buf.len, todo_file, 0);
-	}
+	strbuf_stripspace(&new_todo->buf, 1);
+	if (initial && new_todo->buf.len == 0)
+		return -3;
 
-	todo_list_release(&todo_list);
-	return res;
+	if (!initial && !todo_list_parse_insn_buffer(new_todo->buf.buf, new_todo))
+		todo_list_transform(new_todo, flags & ~(TODO_LIST_SHORTEN_IDS));
+
+	return 0;
 }
 
 define_commit_slab(commit_seen, unsigned char);
