@@ -1,0 +1,3 @@
+changes since v1:
+ - added comment above read_author_script()
+ - rebased to reflect changes added in patch 2
