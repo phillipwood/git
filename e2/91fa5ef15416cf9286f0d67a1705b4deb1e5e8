@@ -1,0 +1,5 @@
+changes since v1
+ - use argv_array_pushf() as suggested by Eric
+ - fixed strbuf handling as suggested by Eric
+ - fix comments and commit message to reflect changed behavior of
+   read_env_script()
