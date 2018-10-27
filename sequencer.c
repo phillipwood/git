@@ -4351,7 +4351,7 @@ int transform_todo_file(unsigned flags)
 	int res;
 
 	if (strbuf_read_file(&todo_list.buf, todo_file, 0) < 0)
-		return error(_("could not read '%s'."), todo_file);
+		return error_errno(_("could not read '%s'."), todo_file);
 
 	if (todo_list_parse_insn_buffer(todo_list.buf.buf, &todo_list)) {
 		todo_list_release(&todo_list);
