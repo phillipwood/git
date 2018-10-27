@@ -255,7 +255,7 @@ int cmd_rebase__interactive(int argc, const char **argv, const char *prefix)
 		ret = transform_todo_file(flags);
 		break;
 	case CHECK_TODO_LIST:
-		ret = check_todo_list();
+		ret = check_todo_list_from_file();
 		break;
 	case REARRANGE_SQUASH:
 		ret = rearrange_squash();
