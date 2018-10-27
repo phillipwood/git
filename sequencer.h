@@ -113,7 +113,9 @@ struct todo_list {
 #define TODO_LIST_INIT { STRBUF_INIT }
 
 int todo_list_parse_insn_buffer(char *buf, struct todo_list *todo_list);
-void todo_list_transform(struct todo_list *todo_list, unsigned flags);
+int todo_list_write_to_file(struct todo_list *todo_list, const char *file,
+			    const char *shortrevisions, const char *shortonto,
+			    int command_count, int append_help, int num, unsigned flags);
 void todo_list_release(struct todo_list *todo_list);
 
 /* Call this to setup defaults before parsing command line options */
