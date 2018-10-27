@@ -4216,6 +4216,50 @@ int sequencer_make_script(FILE *out, int argc, const char **argv,
 	return 0;
 }
 
+static void todo_list_add_exec_commands(struct todo_list *todo_list,
+					const char *commands)
+{
+	struct strbuf *buf = &todo_list->buf;
+	const char *old_buf = buf->buf;
+	size_t commands_len = strlen(commands + strlen("exec ")) - 1;
+	int i, first = 1, nr = 0, alloc = 0;
+	struct todo_item *items = NULL,
+		base_item = {TODO_EXEC, NULL, 0, 0, commands_len, 0};
+
+	strbuf_addstr(buf, commands);
+	base_item.offset_in_buf = buf->len - commands_len - 1;
+	base_item.arg = buf->buf + base_item.offset_in_buf;
+
+	/*
+	 * Insert <commands> after every pick. Here, fixup/squash chains
+	 * are considered part of the pick, so we insert the commands *after*
+	 * those chains if there are any.
+	 */
+	for (i = 0; i < todo_list->nr; i++) {
+		enum todo_command command = todo_list->items[i].command;
+		if (todo_list->items[i].arg)
+			todo_list->items[i].arg = todo_list->items[i].arg - old_buf + buf->buf;
+
+		if (command == TODO_PICK && !first) {
+			ALLOC_GROW(items, nr + 1, alloc);
+			memcpy(items + nr++, &base_item, sizeof(struct todo_item));
+		}
+
+		ALLOC_GROW(items, nr + 1, alloc);
+		memcpy(items + nr++, todo_list->items + i, sizeof(struct todo_item));
+		first = 0;
+	}
+
+	/* insert or append final <commands> */
+	ALLOC_GROW(items, nr + 1, alloc);
+	memcpy(items + nr++, &base_item, sizeof(struct todo_item));
+
+	FREE_AND_NULL(todo_list->items);
+	todo_list->items = items;
+	todo_list->nr = nr;
+	todo_list->alloc = alloc;
+}
+
 /*
  * Add commands after pick and (series of) squash/fixup commands
  * in the todo list.
@@ -4224,10 +4268,7 @@ int sequencer_add_exec_commands(const char *commands)
 {
 	const char *todo_file = rebase_path_todo();
 	struct todo_list todo_list = TODO_LIST_INIT;
-	struct todo_item *item;
-	struct strbuf *buf = &todo_list.buf;
-	size_t offset = 0, commands_len = strlen(commands);
-	int i, first;
+	int res;
 
 	if (strbuf_read_file(&todo_list.buf, todo_file, 0) < 0)
 		return error(_("could not read '%s'."), todo_file);
@@ -4237,23 +4278,11 @@ int sequencer_add_exec_commands(const char *commands)
 		return error(_("unusable todo list: '%s'"), todo_file);
 	}
 
-	first = 1;
-	/* insert <commands> before every pick except the first one */
-	for (item = todo_list.items, i = 0; i < todo_list.nr; i++, item++) {
-		if (item->command == TODO_PICK && !first) {
-			strbuf_insert(buf, item->offset_in_buf + offset,
-				      commands, commands_len);
-			offset += commands_len;
-		}
-		first = 0;
-	}
-
-	/* append final <commands> */
-	strbuf_add(buf, commands, commands_len);
-
-	i = write_message(buf->buf, buf->len, todo_file, 0);
+	todo_list_add_exec_commands(&todo_list, commands);
+	res = todo_list_write_to_file(&todo_list, todo_file, NULL, NULL, 0, 0, -1, 0);
 	todo_list_release(&todo_list);
-	return i;
+
+	return res;
 }
 
 static void todo_list_to_strbuf(struct todo_list *todo_list, struct strbuf *buf,
