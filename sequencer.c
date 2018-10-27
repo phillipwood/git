@@ -4331,21 +4331,13 @@ int todo_list_write_to_file(struct todo_list *todo_list, const char *file,
 			    const char *shortrevisions, const char *shortonto,
 			    int command_count, int append_help, int num, unsigned flags)
 {
-	int edit_todo = !(shortrevisions && shortonto), res;
+	int res;
 	struct strbuf buf = STRBUF_INIT;
 
 	todo_list_to_strbuf(todo_list, &buf, num, flags);
-
-	if (append_help) {
-		if (!edit_todo) {
-			strbuf_addch(&buf, '\n');
-			strbuf_commented_addf(&buf, Q_("Rebase %s onto %s (%d command)",
-						       "Rebase %s onto %s (%d commands)",
-						       command_count),
-					      shortrevisions, shortonto, command_count);
-		}
-		append_todo_help(edit_todo, flags & TODO_LIST_KEEP_EMPTY, &buf);
-	}
+	if (append_help)
+		append_todo_help(flags & TODO_LIST_KEEP_EMPTY, command_count,
+				 shortrevisions, shortonto, &buf);
 
 	res = write_message(buf.buf, buf.len, file, 0);
 	strbuf_release(&buf);
