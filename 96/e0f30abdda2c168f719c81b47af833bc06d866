@@ -1,3 +1,7 @@
+changes since v2:
+ - fixed corner case where a key is given three times (Thanks to Junio
+   for pointing this out)
+
 changes since v1:
  - added comment above read_author_script()
  - rebased to reflect changes added in patch 2
