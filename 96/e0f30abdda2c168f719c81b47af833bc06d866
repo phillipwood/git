@@ -1,4 +1,5 @@
 changes since v2:
+ - tweaked an error message as suggested by Junio
  - fixed corner case where a key is given three times (Thanks to Junio
    for pointing this out)
 
