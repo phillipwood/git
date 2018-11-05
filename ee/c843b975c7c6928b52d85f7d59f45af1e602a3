@@ -1,5 +1,0 @@
-Adding an unmoved line really should not change the colors in this
-case. The problem is that flipped_block is incremented whether or not
-we actually have a new block. To fix it would require incrementing it
-in adjust_last_block() so that the block is cleared when adjusting it
-flipped_block is not incremented.
