@@ -1,0 +1,3 @@
+I cargo culted the ifdef::git-diff[] from --no-color, I'm not sure why
+it is there as it overrides the configuration for 'git log' and friends
+as well.
