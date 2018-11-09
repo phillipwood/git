@@ -140,12 +140,12 @@ int sequencer_remove_state(struct replay_opts *opts);
 int sequencer_make_script(FILE *out, int argc, const char **argv,
 			  unsigned flags);
 
-int sequencer_add_exec_commands(const char *command);
+int sequencer_add_exec_commands(struct string_list *commands);
 int transform_todo_file(unsigned flags);
 int check_todo_list_from_file(void);
 int complete_action(struct replay_opts *opts, unsigned flags,
 		    const char *shortrevisions, const char *onto_name,
-		    const char *onto, const char *orig_head, const char *cmd,
+		    const char *onto, const char *orig_head, struct string_list *commands,
 		    unsigned autosquash);
 int rearrange_squash(void);
 
