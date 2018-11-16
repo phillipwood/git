@@ -1,0 +1,3 @@
+changes since rfc:
+ - split these changes into a separate commit.
+ - tweaked the test to make it harder as suggested by Stefan.
