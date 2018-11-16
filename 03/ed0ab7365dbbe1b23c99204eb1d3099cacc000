@@ -1,3 +1,6 @@
-changes since rfc:
- - split these changes into a separate commit.
- - tweaked the test to make it harder as suggested by Stefan.
+Changes since rfc:
+ - Split these changes into a separate commit.
+ - Detect blank lines when processing the indentation rather than
+   parsing each line twice.
+ - Tweaked the test to make it harder as suggested by Stefan.
+ - Added timing data to the commit message.
