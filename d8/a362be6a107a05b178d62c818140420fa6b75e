@@ -1,4 +1,4 @@
-changes since rfc:
+Changes since rfc:
  - It now replaces the existing implementation rather than adding a new
    mode.
  - The indentation deltas are now calculated once for each line and
