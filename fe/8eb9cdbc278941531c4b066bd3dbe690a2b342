@@ -1,0 +1,11 @@
+changes since rfc:
+ - It now replaces the existing implementation rather than adding a new
+   mode.
+ - The indentation deltas are now calculated once for each line and
+   cached.
+ - Optimized the whitespace delta comparison to compare string lengths
+   before comparing the actual strings.
+ - Modified the calculation of tabs as suggested by Stefan.
+ - Split out the blank line handling into a separate commit as suggest
+   by Stefan.
+ - Fixed some comments pointed out by Stefan.
