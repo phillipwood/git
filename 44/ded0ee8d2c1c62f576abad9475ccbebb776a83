@@ -1,0 +1,4 @@
+Since the coversion to C rebase now uses OPT_STRING_LIST() to parse
+--exec and --strategy-option and so accepts --no-exec and
+--no-strategy-option which did not exist under the shell version. I'm
+not sure if they make sense - if they do we should document them.
