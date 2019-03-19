@@ -1,0 +1,2 @@
+I'm not sure if parse_opt_commit() should be in parse-options-cb.c or
+not, it depends if it is going to be useful elsewhere.
