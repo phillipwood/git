@@ -1,8 +1,0 @@
-I'm not sure what to do with action_names, I moved it to keep it near
-the definition of the enum. The extra commands in the enum are not
-traced so they don't need to be in action_names but it looks odd to
-leave them out. Also I don't understand why action_names in NULL
-terminated or the names are marked for translation as it is used in
-	trace2_cmd_mode(action_names[action]);
-so we don't use the NULL termination or translate the names (I'd be
-surprised if we did for tracing)
