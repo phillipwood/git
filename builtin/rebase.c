@@ -1027,14 +1027,15 @@ int cmd_rebase(int argc, const char **argv, const char *prefix)
 		ACTION_EDIT_TODO,
 		ACTION_SHOW_CURRENT_PATCH,
 	} action = NO_ACTION;
-	static const char *action_names[] = { N_("undefined"),
-					      N_("continue"),
-					      N_("skip"),
-					      N_("abort"),
-					      N_("quit"),
-					      N_("edit_todo"),
-					      N_("show_current_patch"),
-					      NULL };
+	static const char *action_names[] = {
+		[NO_ACTION] = "undefined",
+		[ACTION_CONTINUE] = "continue",
+		[ACTION_SKIP] = "skip",
+		[ACTION_ABORT] = "abort",
+		[ACTION_QUIT] = "quit",
+		[ACTION_EDIT_TODO] = "edit_todo",
+		[ACTION_SHOW_CURRENT_PATCH] = "show_current_patch"
+	};
 	const char *gpg_sign = NULL;
 	struct string_list exec = STRING_LIST_INIT_NODUP;
 	const char *rebase_merges = NULL;
@@ -1225,8 +1226,10 @@ int cmd_rebase(int argc, const char **argv, const char *prefix)
 			trace2_cmd_mode("interactive");
 		else if (exec.nr)
 			trace2_cmd_mode("interactive-exec");
-		else
+		else if (action < ARRAY_SIZE(action_names))
 			trace2_cmd_mode(action_names[action]);
+		else
+			trace2_cmd_mode("unknown rebase action");
 	}
 
 	switch (action) {
