@@ -147,10 +147,16 @@ do
 	--stress)
 		stress=t ;;
 	--stress=*)
+		echo "error: --stress does not accept an argument: '$opt'" >&2
+		echo "did you mean --stress-jobs=${opt#*=} or --stress-limit=${opt#*=}?" >&2
+		exit 1
+		;;
+	--stress-jobs=*)
+		stress=t;
 		stress=${opt#--*=}
 		case "$stress" in
 		*[!0-9]*|0*|"")
-			echo "error: --stress=<N> requires the number of jobs to run" >&2
+			echo "error: --stress-jobs=<N> requires the number of jobs to run" >&2
 			exit 1
 			;;
 		*)	# Good.
@@ -158,6 +164,7 @@ do
 		esac
 		;;
 	--stress-limit=*)
+		stress=t;
 		stress_limit=${opt#--*=}
 		case "$stress_limit" in
 		*[!0-9]*|0*|"")
@@ -1327,7 +1334,11 @@ then
 	fi
 fi
 
-# Provide an implementation of the 'yes' utility
+# Provide an implementation of the 'yes' utility; the upper bound
+# limit is there to help Windows that cannot stop this loop from
+# wasting cycles when the downstream stops reading, so do not be
+# tempted to turn it into an infinite loop. cf. 6129c930 ("test-lib:
+# limit the output of the yes utility", 2016-02-02)
 yes () {
 	if test $# = 0
 	then

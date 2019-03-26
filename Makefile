@@ -479,7 +479,11 @@ all::
 #
 # Define DEVELOPER to enable more compiler warnings. Compiler version
 # and family are auto detected, but could be overridden by defining
-# COMPILER_FEATURES (see config.mak.dev)
+# COMPILER_FEATURES (see config.mak.dev). You can still set
+# CFLAGS="..." in combination with DEVELOPER enables, whether that's
+# for tweaking something unrelated (e.g. optimization level), or for
+# selectively overriding something DEVELOPER or one of the DEVOPTS
+# (see just below) brings in.
 #
 # When DEVELOPER is set, DEVOPTS can be used to control compiler
 # options.  This variable contains keywords separated by
@@ -506,17 +510,8 @@ GIT-VERSION-FILE: FORCE
 	@$(SHELL_PATH) ./GIT-VERSION-GEN
 -include GIT-VERSION-FILE
 
-# CFLAGS and LDFLAGS are for the users to override from the command line.
-
-CFLAGS = -g -O2 -Wall
-LDFLAGS =
-ALL_CFLAGS = $(CPPFLAGS) $(CFLAGS)
-ALL_LDFLAGS = $(LDFLAGS)
-STRIP ?= strip
-
-# Create as necessary, replace existing, make ranlib unneeded.
-ARFLAGS = rcs
-
+# Set our default configuration.
+#
 # Among the variables below, these:
 #   gitexecdir
 #   template_dir
@@ -561,6 +556,7 @@ perllibdir_relative = $(patsubst $(prefix)/%,%,$(perllibdir))
 
 export prefix bindir sharedir sysconfdir gitwebdir perllibdir localedir
 
+# Set our default programs
 CC = cc
 AR = ar
 RM = rm -f
@@ -573,29 +569,14 @@ TCLTK_PATH = wish
 XGETTEXT = xgettext
 MSGFMT = msgfmt
 CURL_CONFIG = curl-config
-PTHREAD_LIBS = -lpthread
-PTHREAD_CFLAGS =
 GCOV = gcov
+STRIP = strip
 SPATCH = spatch
 
 export TCL_PATH TCLTK_PATH
 
-# user customisation variable for 'sparse' target
-SPARSE_FLAGS ?=
-# internal/platform customisation variable for 'sparse'
-SP_EXTRA_FLAGS =
-
-SPATCH_FLAGS = --all-includes --patch .
-
-
-
-### --- END CONFIGURATION SECTION ---
-
-# Those must not be GNU-specific; they are shared with perl/ which may
-# be built by a different compiler. (Note that this is an artifact now
-# but it still might be nice to keep that distinction.)
-BASIC_CFLAGS = -I.
-BASIC_LDFLAGS =
+# Set our default LIBS variables
+PTHREAD_LIBS = -lpthread
 
 # Guard against environment variables
 BUILTIN_OBJS =
@@ -773,6 +754,7 @@ TEST_BUILTINS_OBJS += test-string-list.o
 TEST_BUILTINS_OBJS += test-submodule-config.o
 TEST_BUILTINS_OBJS += test-submodule-nested-repo-config.o
 TEST_BUILTINS_OBJS += test-subprocess.o
+TEST_BUILTINS_OBJS += test-trace2.o
 TEST_BUILTINS_OBJS += test-urlmatch-normalization.o
 TEST_BUILTINS_OBJS += test-xml-encode.o
 TEST_BUILTINS_OBJS += test-wildmatch.o
@@ -841,7 +823,8 @@ VCSSVN_LIB = vcs-svn/lib.a
 
 GENERATED_H += command-list.h
 
-LIB_H = $(shell $(FIND) . \
+LIB_H := $(shell git ls-files '*.h' ':!t/' ':!Documentation/' 2>/dev/null || \
+	$(FIND) . \
 	-name .git -prune -o \
 	-name t -prune -o \
 	-name Documentation -prune -o \
@@ -1017,6 +1000,16 @@ LIB_OBJS += tempfile.o
 LIB_OBJS += thread-utils.o
 LIB_OBJS += tmp-objdir.o
 LIB_OBJS += trace.o
+LIB_OBJS += trace2.o
+LIB_OBJS += trace2/tr2_cfg.o
+LIB_OBJS += trace2/tr2_cmd_name.o
+LIB_OBJS += trace2/tr2_dst.o
+LIB_OBJS += trace2/tr2_sid.o
+LIB_OBJS += trace2/tr2_tbuf.o
+LIB_OBJS += trace2/tr2_tgt_event.o
+LIB_OBJS += trace2/tr2_tgt_normal.o
+LIB_OBJS += trace2/tr2_tgt_perf.o
+LIB_OBJS += trace2/tr2_tls.o
 LIB_OBJS += trailer.o
 LIB_OBJS += transport.o
 LIB_OBJS += transport-helper.o
@@ -1165,6 +1158,25 @@ ifeq ($(wildcard sha1collisiondetection/lib/sha1.h),sha1collisiondetection/lib/s
 DC_SHA1_SUBMODULE = auto
 endif
 
+# Set CFLAGS, LDFLAGS and other *FLAGS variables. These might be
+# tweaked by config.* below as well as the command-line, both of
+# which'll override these defaults.
+CFLAGS = -g -O2 -Wall
+LDFLAGS =
+BASIC_CFLAGS = -I.
+BASIC_LDFLAGS =
+
+# library flags
+ARFLAGS = rcs
+PTHREAD_CFLAGS =
+
+# For the 'sparse' target
+SPARSE_FLAGS ?=
+SP_EXTRA_FLAGS =
+
+# For the 'coccicheck' target
+SPATCH_FLAGS = --all-includes --patch .
+
 include config.mak.uname
 -include config.mak.autogen
 -include config.mak
@@ -1172,6 +1184,9 @@ include config.mak.uname
 ifdef DEVELOPER
 include config.mak.dev
 endif
+
+ALL_CFLAGS = $(DEVELOPER_CFLAGS) $(CPPFLAGS) $(CFLAGS)
+ALL_LDFLAGS = $(LDFLAGS)
 
 comma := ,
 empty :=
@@ -1596,7 +1611,9 @@ ifdef NO_INET_PTON
 	LIB_OBJS += compat/inet_pton.o
 	BASIC_CFLAGS += -DNO_INET_PTON
 endif
-ifndef NO_UNIX_SOCKETS
+ifdef NO_UNIX_SOCKETS
+	BASIC_CFLAGS += -DNO_UNIX_SOCKETS
+else
 	LIB_OBJS += unix-socket.o
 	PROGRAM_OBJS += credential-cache.o
 	PROGRAM_OBJS += credential-cache--daemon.o
@@ -2363,7 +2380,7 @@ else
 # should _not_ be included here, since they are necessary even when
 # building an object for the first time.
 
-$(OBJECTS): $(LIB_H)
+$(OBJECTS): $(LIB_H) $(GENERATED_H)
 endif
 
 exec-cmd.sp exec-cmd.s exec-cmd.o: GIT-PREFIX
@@ -2736,7 +2753,10 @@ $(SP_OBJ): %.sp: %.c GIT-CFLAGS FORCE
 sparse: $(SP_OBJ)
 
 GEN_HDRS := command-list.h unicode-width.h
-EXCEPT_HDRS := $(GEN_HDRS) compat% xdiff%
+EXCEPT_HDRS := $(GEN_HDRS) compat/% xdiff/%
+ifndef GCRYPT_SHA256
+	EXCEPT_HDRS += sha256/gcrypt.h
+endif
 CHK_HDRS = $(filter-out $(EXCEPT_HDRS),$(patsubst ./%,%,$(LIB_H)))
 HCO = $(patsubst %.h,%.hco,$(CHK_HDRS))
 

@@ -1,0 +1,150 @@
+Git 2.22 Release Notes
+======================
+
+Updates since v2.21
+-------------------
+
+UI, Workflows & Features
+
+ * "git checkout --no-overlay" can be used to trigger a new mode of
+   checking out paths out of the tree-ish, that allows paths that
+   match the pathspec that are in the current index and working tree
+   and are not in the tree-ish.
+
+ * The %(trailers) formatter in "git log --format=..."  now allows to
+   optionally pick trailers selectively by keyword, show only values,
+   etc.
+
+ * Four new configuration variables {author,committer}.{name,email}
+   have been introduced to override user.{name,email} in more specific
+   cases.
+
+ * Command-line completion (in contrib/) learned to tab-complete the
+   "git submodule absorbgitdirs" subcommand.
+
+ * "git branch" learned a new subcommand "--show-current".
+
+ * Output from "diff --cc" did not show the original paths when the
+   merge involved renames.  A new option adds the paths in the
+   original trees to the output.
+
+ * The command line completion (in contrib/) has been taught to
+   complete more subcommand parameters.
+
+ * The final report from "git bisect" used to show the suspected
+   culprit using a raw "diff-tree", with which there is no output for
+   a merge commit.  This has been updated to use a more modern and
+   human readable output that still is concise enough.
+
+
+Performance, Internal Implementation, Development Support etc.
+
+ * The diff machinery, one of the oldest parts of the system, which
+   long predates the parse-options API, uses fairly long and complex
+   handcrafted option parser.  This is being rewritten to use the
+   parse-options API.
+
+ * The implementation of pack-redundant has been updated for
+   performance in a repository with many packfiles.
+
+ * A more structured way to obtain execution trace has been added.
+
+ * "git prune" has been taught to take advantage of reachability
+   bitmap when able.
+
+ * The command line parser of "git commit-tree" has been rewritten to
+   use the parse-options API.
+
+
+Fixes since v2.21
+-----------------
+
+ * "git prune-packed" did not notice and complain against excess
+   arguments given from the command line, which now it does.
+   (merge 9b0bd87ed2 rj/prune-packed-excess-args later to maint).
+
+ * Split-index fix.
+   (merge 6e37c8ed3c nd/split-index-null-base-fix later to maint).
+
+ * "git diff --no-index" may still want to access Git goodies like
+   --ext-diff and --textconv, but so far these have been ignored,
+   which has been corrected.
+   (merge 287ab28bfa jk/diff-no-index-initialize later to maint).
+
+ * Unify RPC code for smart http in protocol v0/v1 and v2, which fixes
+   a bug in the latter (lack of authentication retry) and generally
+   improves the code base.
+   (merge a97d00799a jt/http-auth-proto-v2-fix later to maint).
+
+ * The include file compat/bswap.h has been updated so that it is safe
+   to (accidentally) include it more than once.
+   (merge 33aa579a55 jk/guard-bswap-header later to maint).
+
+ * The set of header files used by "make hdr-check" unconditionally
+   included sha256/gcrypt.h, even when it is not used, causing the
+   make target to fail.  We now skip it when GCRYPT_SHA256 is not in
+   use.
+   (merge f23aa18e7f rj/hdr-check-gcrypt-fix later to maint).
+
+ * The Makefile uses 'find' utility to enumerate all the *.h header
+   files, which is expensive on platforms with slow filesystems; it
+   now optionally uses "ls-files" if working within a repository,
+   which is a trick similar to how all sources are enumerated to run
+   ETAGS on.
+   (merge 92b88eba9f js/find-lib-h-with-ls-files-when-possible later to maint).
+
+ * "git rebase" that was reimplemented in C did not set ORIG_HEAD
+   correctly, which has been corrected.
+   (merge cbd29ead92 js/rebase-orig-head-fix later to maint).
+
+ * Dev support.
+   (merge f545737144 js/stress-test-ui-tweak later to maint).
+
+ * CFLAGS now can be tweaked when invoking Make while using
+   DEVELOPER=YesPlease; this did not work well before.
+   (merge 6d5d4b4e93 ab/makefile-help-devs-more later to maint).
+
+ * "git fsck --connectivity-only" omits computation necessary to sift
+   the objects that are not reachable from any of the refs into
+   unreachable and dangling.  This is now enabled when dangling
+   objects are requested (which is done by default, but can be
+   overridden with the "--no-dangling" option).
+   (merge 8d8c2a5aef jk/fsck-doc later to maint).
+
+ * On platforms where "git fetch" is killed with SIGPIPE (e.g. OSX),
+   the upload-pack that runs on the other end that hangs up after
+   detecting an error could cause "git fetch" to die with a signal,
+   which led to a flakey test.  "git fetch" now ignores SIGPIPE during
+   the network portion of its operation (this is not a problem as we
+   check the return status from our write(2)s).
+   (merge 143588949c jk/no-sigpipe-during-network-transport later to maint).
+
+ * A recent update broke "is this object available to us?" check for
+   well-known objects like an empty tree (which should yield "yes",
+   even when there is no on-disk object for an empty tree), which has
+   been corrected.
+   (merge f06ab027ef jk/virtual-objects-do-exist later to maint).
+
+ * The setup code has been cleaned up to avoid leaks around the
+   repository_format structure.
+   (merge e8805af1c3 ma/clear-repository-format later to maint).
+
+ * "git config --type=color ..." is meant to replace "git config --get-color"
+   but there is a slight difference that wasn't documented, which is
+   now fixed.
+   (merge cd8e7593b9 jk/config-type-color-ends-with-lf later to maint).
+
+ * Code cleanup, docfix, build fix, etc.
+   (merge 11f470aee7 jc/test-yes-doc later to maint).
+   (merge 90503a240b js/doc-symref-in-proto-v1 later to maint).
+   (merge 5c326d1252 jk/unused-params later to maint).
+   (merge 68cabbfda3 dl/doc-submodule-wo-subcommand later to maint).
+   (merge 9903623761 ab/receive-pack-use-after-free-fix later to maint).
+   (merge 1ede45e44b en/merge-options-doc later to maint).
+   (merge 3e14dd2c8e rd/doc-hook-used-in-sample later to maint).
+   (merge c271dc28fd nd/no-more-check-racy later to maint).
+   (merge e6e15194a8 yb/utf-16le-bom-spellfix later to maint).
+   (merge bb101aaf0c rd/attr.c-comment-typofix later to maint).
+   (merge 716a5af812 rd/gc-prune-doc-fix later to maint).
+   (merge 50b206371d js/untravis-windows later to maint).
+   (merge dbf47215e3 js/rebase-recreate-merge later to maint).
