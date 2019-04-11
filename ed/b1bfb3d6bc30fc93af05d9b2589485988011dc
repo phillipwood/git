@@ -1,4 +1,0 @@
-I'm not user about printing the oid of the commit that was just picked,
-maybe we should just say that a cherry-pick/revert is in progress, that
-will mean auditing all the consumers of wt_status_get_state() to ensure
-they can cope with a null oid.
