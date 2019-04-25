@@ -39,3 +39,14 @@ read_tree_u_must_fail () {
 	test_cmp pre-dry-run-wt post-dry-run-wt &&
 	test_must_fail git read-tree "$@"
 }
+
+read_tree_u_must_fail_save_err () {
+	git ls-files -s >pre-dry-run &&
+	git diff-files -p >pre-dry-run-wt &&
+	test_must_fail git read-tree -n "$@" &&
+	git ls-files -s >post-dry-run &&
+	git diff-files -p >post-dry-run-wt &&
+	test_cmp pre-dry-run post-dry-run &&
+	test_cmp pre-dry-run-wt post-dry-run-wt &&
+	test_must_fail git read-tree "$@" 2>actual-err
+}

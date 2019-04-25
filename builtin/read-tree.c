@@ -114,6 +114,7 @@ static int git_read_tree_config(const char *var, const char *value, void *cb)
 int cmd_read_tree(int argc, const char **argv, const char *unused_prefix)
 {
 	int i, stage = 0;
+	int protect_untracked = -1;
 	struct object_id oid;
 	struct tree_desc t[MAX_UNPACK_TREES];
 	struct unpack_trees_options opts;
@@ -140,6 +141,8 @@ int cmd_read_tree(int argc, const char **argv, const char *unused_prefix)
 		  PARSE_OPT_NONEG },
 		OPT_BOOL('u', NULL, &opts.update,
 			 N_("update working tree with merge result")),
+		OPT_BOOL(0, "protect-untracked", &protect_untracked,
+			 N_("do not overwrite untracked files")),
 		{ OPTION_CALLBACK, 0, "exclude-per-directory", &opts,
 		  N_("gitignore"),
 		  N_("allow explicitly ignored files to be overwritten"),
@@ -208,8 +211,17 @@ int cmd_read_tree(int argc, const char **argv, const char *unused_prefix)
 	if ((opts.update || opts.index_only) && !opts.merge)
 		die("%s is meaningless without -m, --reset, or --prefix",
 		    opts.update ? "-u" : "-i");
+	if (protect_untracked >= 0) {
+		if (!opts.reset || !opts.update)
+			die("-%s-protect-untracked requires --reset and -u",
+			    protect_untracked ? "" : "-no");
+		opts.reset = UNPACK_RESET_PROTECT_UNTRACKED;
+	}
 	if ((opts.dir && !opts.update))
 		die("--exclude-per-directory is meaningless unless -u");
+	if (opts.dir && opts.reset == UNPACK_RESET_OVERWRITE_UNTRACKED)
+		warning("--exclude-per-directory without --preserve-untracked "
+			"has no effect");
 	if (opts.merge && !opts.index_only)
 		setup_work_tree();
 

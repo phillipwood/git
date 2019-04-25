@@ -38,12 +38,19 @@ OPTIONS
 	started.
 
 --reset::
-        Same as -m, except that unmerged entries are discarded
-        instead of failing.
+	Same as -m, except that unmerged entries are discarded instead
+	of failing. When used with `-u`, updates leading to loss of
+	working tree changes will not abort the operation and
+	untracked files will be overwritten. Use `--protect-untracked`
+	to avoid overwriting untracked files.
 
 -u::
 	After a successful merge, update the files in the work
 	tree with the result of the merge.
+
+--protect-untracked::
+	Prevent `--reset` `-u` from overwriting untracked files. Requires
+	`--reset` and `-u` (`-m` never overwrites untracked files).
 
 -i::
 	Usually a merge requires the index file as well as the
@@ -88,7 +95,7 @@ OPTIONS
 	existed in the original index file.
 
 --exclude-per-directory=<gitignore>::
-	When running the command with `-u` and `-m` options, the
+	When using `-u` with `-m` or `--reset` `--protect-untracked` options, the
 	merge result may need to overwrite paths that are not
 	tracked in the current branch.  The command usually
 	refuses to proceed with the merge to avoid losing such a

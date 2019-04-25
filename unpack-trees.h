@@ -41,9 +41,15 @@ void setup_unpack_trees_porcelain(struct unpack_trees_options *opts,
  */
 void clear_unpack_trees_porcelain(struct unpack_trees_options *opts);
 
+enum unpack_trees_reset_type {
+	UNPACK_NO_RESET = 0,
+	UNPACK_RESET_OVERWRITE_UNTRACKED,
+	UNPACK_RESET_PROTECT_UNTRACKED
+};
+
 struct unpack_trees_options {
-	unsigned int reset,
-		     merge,
+	enum unpack_trees_reset_type reset;
+	unsigned int merge,
 		     update,
 		     clone,
 		     index_only,

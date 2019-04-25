@@ -19,13 +19,46 @@ test_expect_success 'setup' '
 	git add df &&
 	echo content >new &&
 	git add new &&
-	git commit -m two
+	git commit -m two &&
+	git ls-files >expect-two
 '
 
-test_expect_success 'reset should work' '
+test_expect_success '--protect-untracked option sanity checks' '
+	read_tree_u_must_fail --reset --protect-untracked HEAD &&
+	read_tree_u_must_fail --reset --no-protect-untracked HEAD &&
+	read_tree_u_must_fail -m -u --protect-untracked HEAD &&
+	read_tree_u_must_fail -m -u --no-protect-untracked
+'
+
+test_expect_success 'reset should reset worktree' '
+	echo changed >df &&
 	read_tree_u_must_succeed -u --reset HEAD^ &&
 	git ls-files >actual &&
 	test_cmp expect actual
+'
+
+test_expect_success 'reset --protect-untracked protects untracked file' '
+	echo changed >new &&
+	read_tree_u_must_fail_save_err -u --reset --protect-untracked HEAD &&
+	echo "error: Untracked working tree file '\'new\'' would be overwritten by merge." >expected-err &&
+	test_cmp expected-err actual-err
+'
+
+test_expect_success 'reset --protect-untracked protects untracked directory' '
+	rm new &&
+	mkdir new &&
+	echo untracked >new/untracked &&
+	read_tree_u_must_fail_save_err -u --reset --protect-untracked HEAD &&
+	echo "error: Updating '\'new\'' would lose untracked files in it" >expected-err &&
+	test_cmp expected-err actual-err
+'
+
+test_expect_success 'reset --protect-untracked resets' '
+	rm -rf new &&
+	echo changed >df/file &&
+	read_tree_u_must_succeed -u --reset --protect-untracked HEAD &&
+	git ls-files >actual-two &&
+	test_cmp expect-two actual-two
 '
 
 test_expect_success 'reset should remove remnants from a failed merge' '

@@ -1920,7 +1920,8 @@ static int verify_absent_1(const struct cache_entry *ce,
 	int len;
 	struct stat st;
 
-	if (o->index_only || o->reset || !o->update)
+	if (o->index_only || o->reset == UNPACK_RESET_OVERWRITE_UNTRACKED ||
+	    !o->update)
 		return 0;
 
 	len = check_leading_path(ce->name, ce_namelen(ce));
