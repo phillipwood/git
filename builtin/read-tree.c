@@ -50,6 +50,40 @@ static int index_output_cb(const struct option *opt, const char *arg,
 	return 0;
 }
 
+enum exclude_type {
+	EXCLUDE_NONE,
+	EXCLUDE_PER_DIRECTORY,
+	EXCLUDE_STANDARD
+} exclude_opt = EXCLUDE_NONE;
+
+static int exclude_error(enum exclude_type exclude)
+{
+	if (exclude == exclude_opt)
+		return error("more than one --exclude-per-directory given");
+	else
+		return error("cannot combine --exclude-per-directory and "
+			     "--exclude-standard");
+}
+
+static int option_parse_exclude_standard(const struct option *opt,
+					 const char *arg, int unset)
+{
+	struct unpack_trees_options *opts;
+
+	BUG_ON_OPT_NEG(unset);
+	BUG_ON_OPT_ARG(arg);
+
+	if (exclude_opt == EXCLUDE_PER_DIRECTORY)
+		return exclude_error(EXCLUDE_STANDARD);
+
+	opts = (struct unpack_trees_options *)opt->value;
+	opts->dir = xcalloc(1, sizeof(*opts->dir));
+	setup_standard_excludes(opts->dir);
+	exclude_opt = EXCLUDE_STANDARD;
+
+	return 0;
+}
+
 static int exclude_per_directory_cb(const struct option *opt, const char *arg,
 				    int unset)
 {
@@ -61,12 +95,13 @@ static int exclude_per_directory_cb(const struct option *opt, const char *arg,
 	opts = (struct unpack_trees_options *)opt->value;
 
 	if (opts->dir)
-		die("more than one --exclude-per-directory given.");
+		return exclude_error(EXCLUDE_PER_DIRECTORY);
 
 	dir = xcalloc(1, sizeof(*opts->dir));
 	dir->flags |= DIR_SHOW_IGNORED;
 	dir->exclude_per_dir = arg;
 	opts->dir = dir;
+	exclude_opt = EXCLUDE_PER_DIRECTORY;
 	/* We do not need to nor want to do read-directory
 	 * here; we are merely interested in reusing the
 	 * per directory ignore stack mechanism.
@@ -147,6 +182,10 @@ int cmd_read_tree(int argc, const char **argv, const char *unused_prefix)
 		  N_("gitignore"),
 		  N_("allow explicitly ignored files to be overwritten"),
 		  PARSE_OPT_NONEG, exclude_per_directory_cb },
+		{ OPTION_CALLBACK, 0, "exclude-standard", &opts, NULL,
+			N_("add the standard git exclusions"),
+			PARSE_OPT_NOARG | PARSE_OPT_NONEG,
+			option_parse_exclude_standard },
 		OPT_BOOL('i', NULL, &opts.index_only,
 			 N_("don't check the working tree after merging")),
 		OPT__DRY_RUN(&opts.dry_run, N_("don't update the index or the work tree")),
@@ -218,10 +257,16 @@ int cmd_read_tree(int argc, const char **argv, const char *unused_prefix)
 		opts.reset = UNPACK_RESET_PROTECT_UNTRACKED;
 	}
 	if ((opts.dir && !opts.update))
-		die("--exclude-per-directory is meaningless unless -u");
-	if (opts.dir && opts.reset == UNPACK_RESET_OVERWRITE_UNTRACKED)
-		warning("--exclude-per-directory without --preserve-untracked "
-			"has no effect");
+		die("%s requires -u", exclude_opt == EXCLUDE_STANDARD ?
+			"--exclude-standard" :" --exclude-per-directory");
+	if (opts.dir && opts.reset == UNPACK_RESET_OVERWRITE_UNTRACKED) {
+		if (exclude_opt == EXCLUDE_STANDARD)
+			die("--reset with --exclude-standard requires "
+			    "--protect-untracked");
+		else
+			warning("--exclude-per-directory without "
+				"--preserve-untracked has no effect");
+	}
 	if (opts.merge && !opts.index_only)
 		setup_work_tree();
 

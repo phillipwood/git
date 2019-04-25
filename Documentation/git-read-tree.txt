@@ -107,7 +107,14 @@ OPTIONS
 	running `make clean` to remove the generated file.  This
 	option tells the command to read per-directory exclude
 	file (usually '.gitignore') and allows such an untracked
-	but explicitly ignored file to be overwritten.
+	but explicitly ignored file to be overwritten. Incompatible
+	with `--exclude-standard`.
+
+--exclude-standard::
+	When updating the worktree use the standard Git exclusions:
+	.git/info/exclude, .gitignore in each directory, and the user's global
+	exclusion file when deciding if it is safe to overwrite a file.
+	Incompatible with `--exclude-per-directory`.
 
 --index-output=<file>::
 	Instead of writing the results out to `$GIT_INDEX_FILE`,

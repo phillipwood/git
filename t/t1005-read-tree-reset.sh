@@ -30,6 +30,20 @@ test_expect_success '--protect-untracked option sanity checks' '
 	read_tree_u_must_fail -m -u --no-protect-untracked
 '
 
+test_expect_success 'exclude option sanity checks' '
+	read_tree_u_must_fail --reset -u --exclude-standard HEAD &&
+	read_tree_u_must_fail --reset --protect-untracked --exclude-standard &&
+	read_tree_u_must_fail --reset -u --protect-untracked \
+			      --exclude-standard \
+			      --exclude-per-directory=.gitignore HEAD &&
+	read_tree_u_must_fail --reset -u --protect-untracked \
+			      --exclude-per-directory=gitignore \
+			      --exclude-per-directory=.gitignore HEAD &&
+	read_tree_u_must_fail --reset --exclude-per-directory=.gitignore HEAD &&
+	read_tree_u_must_succeed --reset -u --exclude-per-directory=.gitignore \
+				 HEAD
+'
+
 test_expect_success 'reset should reset worktree' '
 	echo changed >df &&
 	read_tree_u_must_succeed -u --reset HEAD^ &&
@@ -53,12 +67,24 @@ test_expect_success 'reset --protect-untracked protects untracked directory' '
 	test_cmp expected-err actual-err
 '
 
-test_expect_success 'reset --protect-untracked resets' '
-	rm -rf new &&
+test_expect_success 'reset --protect-untracked --exclude-standard overwrites ignored path' '
+	test_when_finished "rm .git/info/exclude" &&
+	echo missing >.git/info/exclude &&
+	read_tree_u_must_fail -u --reset --protect-untracked \
+			      --exclude-standard HEAD &&
+	echo new >.git/info/exclude &&
 	echo changed >df/file &&
-	read_tree_u_must_succeed -u --reset --protect-untracked HEAD &&
-	git ls-files >actual-two &&
-	test_cmp expect-two actual-two
+	read_tree_u_must_succeed -u --reset --protect-untracked \
+				 --exclude-standard HEAD &&
+	git ls-files >actual &&
+	test_cmp expect-two actual
+'
+
+test_expect_success 'reset --protect-untracked resets' '
+	echo changed >df &&
+	read_tree_u_must_succeed -u --reset --protect-untracked HEAD^ &&
+	git ls-files >actual &&
+	test_cmp expect actual
 '
 
 test_expect_success 'reset should remove remnants from a failed merge' '
