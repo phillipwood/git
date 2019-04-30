@@ -2168,6 +2168,7 @@ run_rebase:
 	ret = !!run_specific_rebase(&options, action);
 
 cleanup:
+	strbuf_release(&buf);
 	strbuf_release(&revisions);
 	free(options.head_name);
 	free(options.gpg_sign_opt);
