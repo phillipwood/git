@@ -1,4 +1,4 @@
 adding --protect-untracked to the invocation of
 test_submodule_forced_switch() in t1013 fixes the known breakage of
 tests 57 & 58 but breaks test 64 which relies on forcing. I'm not sure
-if the expected results of 57 & 58 are correct if we're forcing.
+that the expected results of 57 & 58 are correct if we're forcing.
