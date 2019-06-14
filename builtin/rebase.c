@@ -418,7 +418,7 @@ static int reset_head(struct object_id *oid, const char *action,
 	unpack_tree_opts.update = 1;
 	unpack_tree_opts.merge = 1;
 	if (!detach_head)
-		unpack_tree_opts.reset = UNPACK_RESET_OVERWRITE_UNTRACKED;
+		unpack_tree_opts.reset = UNPACK_RESET_PROTECT_UNTRACKED;
 
 	if (repo_read_index_unmerged(the_repository) < 0) {
 		ret = error(_("could not read index"));
