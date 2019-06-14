@@ -1853,7 +1853,8 @@ next:
  * true, any unmerged entries will be discarded. Returns 0 on success, -1 on
  * failure.
  */
-static int fast_forward_to(struct tree *head, struct tree *remote, int reset)
+static int fast_forward_to(struct tree *head, struct tree *remote,
+			   enum unpack_trees_reset_type reset)
 {
 	struct lock_file lock_file = LOCK_INIT;
 	struct unpack_trees_options opts;
@@ -1941,7 +1942,8 @@ static int clean_index(const struct object_id *head, const struct object_id *rem
 
 	read_cache_unmerged();
 
-	if (fast_forward_to(head_tree, head_tree, 1))
+	if (fast_forward_to(head_tree, head_tree,
+			    UNPACK_RESET_OVERWRITE_UNTRACKED))
 		return -1;
 
 	if (write_cache_as_tree(&index, 0, NULL))
@@ -1951,7 +1953,7 @@ static int clean_index(const struct object_id *head, const struct object_id *rem
 	if (!index_tree)
 		return error(_("Could not parse object '%s'."), oid_to_hex(&index));
 
-	if (fast_forward_to(index_tree, remote_tree, 0))
+	if (fast_forward_to(index_tree, remote_tree, UNPACK_NO_RESET))
 		return -1;
 
 	if (merge_tree(remote_tree))

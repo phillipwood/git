@@ -70,7 +70,7 @@ static int reset_index(const struct object_id *oid, int reset_type, int quiet)
 		opts.update = 1;
 		/* fallthrough */
 	default:
-		opts.reset = 1;
+		opts.reset = UNPACK_RESET_OVERWRITE_UNTRACKED;
 	}
 
 	read_cache_unmerged();
