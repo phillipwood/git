@@ -106,7 +106,9 @@ ambiguous but exists on the 'origin' remote. See also
 
 -f::
 --force::
-	An alias for `--discard-changes`.
+	Like `--discard-changes` but will also overwrite untracked
+	files.
+
 
 --discard-changes::
 	Proceed even if the index or the working tree differs from

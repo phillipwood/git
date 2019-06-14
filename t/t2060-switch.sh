@@ -93,4 +93,33 @@ test_expect_success 'not switching when something is in progress' '
 	test_must_fail git switch -d @^
 '
 
+TAB="	"
+test_expect_success 'switch --discard-changes does not overwrite untracked files' '
+	git switch first-branch &&
+	echo x>second.t &&
+	echo changed >first.t &&
+	cp first.t expected &&
+	cat >>err-expected <<-EOF &&
+	error: The following untracked working tree files would be overwritten by checkout:
+	${TAB}second.t
+	Please move or remove them before you switch branches.
+	Aborting
+	EOF
+	test_must_fail git switch --discard-changes master 2>error &&
+	test_i18ncmp err-expected error &&
+	test_cmp expected first.t &&
+	rm second.t &&
+	git switch --discard-changes master &&
+	git diff-index --exit-code HEAD
+'
+
+test_expect_success 'switch --force does overwrite untracked files' '
+	git switch first-branch &&
+	echo x>second.t &&
+	echo changed >first.t &&
+	cp first.t expected &&
+	git switch --force master &&
+	git diff-index --exit-code HEAD
+'
+
 test_done

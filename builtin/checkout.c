@@ -585,12 +585,13 @@ static int reset_tree(struct tree *tree, const struct checkout_opts *o,
 {
 	struct unpack_trees_options opts;
 	struct tree_desc tree_desc;
+	int res;
 
 	memset(&opts, 0, sizeof(opts));
 	opts.head_idx = -1;
 	opts.update = worktree;
 	opts.skip_unmerged = !worktree;
-	opts.reset = UNPACK_RESET_OVERWRITE_UNTRACKED;
+	opts.reset = o->discard_changes;
 	opts.merge = 1;
 	opts.fn = oneway_merge;
 	opts.verbose_update = o->show_progress;
@@ -598,7 +599,10 @@ static int reset_tree(struct tree *tree, const struct checkout_opts *o,
 	opts.dst_index = &the_index;
 	parse_tree(tree);
 	init_tree_desc(&tree_desc, tree->buffer, tree->size);
-	switch (unpack_trees(1, &tree_desc, &opts)) {
+	setup_unpack_trees_porcelain(&opts, "checkout");
+	res = unpack_trees(1, &tree_desc, &opts);
+	clear_unpack_trees_porcelain(&opts);
+	switch (res) {
 	case -2:
 		*writeout_error = 1;
 		/*
@@ -1508,7 +1512,7 @@ static int checkout_main(int argc, const char **argv, const char *prefix,
 		git_xmerge_config("merge.conflictstyle", opts->conflict_style, NULL);
 	}
 	if (opts->force) {
-		opts->discard_changes = 1;
+		opts->discard_changes = UNPACK_RESET_OVERWRITE_UNTRACKED;
 		opts->ignore_unmerged_opt = "--force";
 		opts->ignore_unmerged = 1;
 	}
@@ -1720,8 +1724,9 @@ int cmd_switch(int argc, const char **argv, const char *prefix)
 			   N_("create/reset and switch to a branch")),
 		OPT_BOOL(0, "guess", &opts.dwim_new_local_branch,
 			 N_("second guess 'git switch <no-such-branch>'")),
-		OPT_BOOL(0, "discard-changes", &opts.discard_changes,
-			 N_("throw away local modifications")),
+		OPT_SET_INT(0, "discard-changes", &opts.discard_changes,
+			    N_("throw away local modifications"),
+			    UNPACK_RESET_PROTECT_UNTRACKED),
 		OPT_END()
 	};
 	int ret;
