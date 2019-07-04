@@ -1,0 +1,2 @@
+This has semantic conflicts with builtin/stash.c in master, which
+should be converted to use the new enum as well.
