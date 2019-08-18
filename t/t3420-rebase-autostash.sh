@@ -306,4 +306,13 @@ test_expect_success 'branch is left alone when possible' '
 	test unchanged-branch = "$(git rev-parse --abbrev-ref HEAD)"
 '
 
+test_expect_success 'never change upstream branch' '
+	test_when_finished "git reset --hard && git branch -D upstream" &&
+	git checkout -b upstream unrelated-onto-branch &&
+	echo changed >file0 &&
+	git add file0 &&
+	git rebase --autostash upstream feature-branch &&
+	test $(git rev-parse upstream) = $(git rev-parse unrelated-onto-branch)
+'
+
 test_done
