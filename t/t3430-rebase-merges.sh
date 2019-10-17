@@ -62,7 +62,24 @@ test_expect_success 'setup' '
 	h=$(git rev-parse --short HEAD) &&
 	git tag -m H H &&
 	git checkout A &&
-	test_commit conflicting-G G.t
+	test_commit conflicting-G G.t &&
+	git checkout -b three A &&
+	test_commit before-octopus &&
+	before_octopus=$(git rev-parse HEAD) &&
+	test_commit three &&
+	git checkout -b two HEAD^ &&
+	test_commit two &&
+	git checkout -b one HEAD^ &&
+	test_commit one &&
+	test_tick &&
+	GIT_AUTHOR_NAME="Hank" GIT_AUTHOR_EMAIL="hank@sea.world" \
+		git merge -m "Tüntenfüsch" two three &&
+	git tag octopus &&
+	echo x>x &&
+	git add x &&
+	test_tick &&
+	git commit --amend -m edited-octopus &&
+	git tag edited-octopus
 '
 
 test_expect_success 'create completely different structure' '
@@ -420,17 +437,7 @@ test_expect_success 'labels that are object IDs are rewritten' '
 '
 
 test_expect_success 'octopus merges' '
-	git checkout -b three &&
-	test_commit before-octopus &&
-	test_commit three &&
-	git checkout -b two HEAD^ &&
-	test_commit two &&
-	git checkout -b one HEAD^ &&
-	test_commit one &&
-	test_tick &&
-	(GIT_AUTHOR_NAME="Hank" GIT_AUTHOR_EMAIL="hank@sea.world" \
-	 git merge -m "Tüntenfüsch" two three) &&
-
+	git checkout octopus &&
 	: fast forward if possible &&
 	before="$(git rev-parse --verify HEAD)" &&
 	test_tick &&
@@ -532,6 +539,73 @@ test_expect_success '--rebase-merges with message matched with onto label' '
 	|/
 	* A
 	EOF
+'
+
+EMPTY=''
+test_expect_success 'reusing the tree of an octopus merge' '
+	git checkout octopus &&
+	test_write_lines "reset before-octopus" "reword tags/two" "label new-two" \
+			 "reset before-octopus" "reword tags/one" \
+			 "merge -C edited-octopus new-two tags/three" \
+				>>script-from-scratch &&
+	GIT_EDITOR="echo edited >>" GIT_SEQUENCE_EDITOR=./replace-editor.sh \
+		git rebase -i -r before-octopus edited-octopus &&
+	touch expect &&
+	test_cmp_rev edited-octopus^{tree} HEAD^{tree} &&
+	cat >expect <<-EOF &&
+	$(git rev-parse tags/one^{tree}) $before_octopus
+	one
+	$EMPTY
+	edited
+	$EMPTY
+	$(git rev-parse tags/two^{tree}) $before_octopus
+	two
+	$EMPTY
+	edited
+	$EMPTY
+	$(git rev-parse tags/three^{tree}) $before_octopus
+	three
+	EOF
+	git log --no-walk=unsorted \
+		--pretty=format:"%T %P%n%B" HEAD^ HEAD^2 HEAD^3 >actual &&
+	test_cmp expect actual
+'
+
+test_expect_success 'cherry-pick an octopus merge when one parent tree is changed' '
+	test_write_lines "reset before-octopus" "edit tags/two" "label new-two" \
+			 "reset before-octopus" "reword tags/one" \
+			 "merge -C edited-octopus new-two tags/three" \
+				>>script-from-scratch &&
+	git checkout edited-octopus &&
+	echo two-a >two.t &&
+	git add two.t &&
+	expected_merge_tree=$(git write-tree) &&
+	git read-tree -u --reset HEAD &&
+	GIT_SEQUENCE_EDITOR=./replace-editor.sh \
+		git rebase -i -r before-octopus &&
+	echo two-a >two.t &&
+	git add -u &&
+	expected_two_tree=$(git write-tree) &&
+	GIT_EDITOR="echo edited >>" git rebase --continue &&
+	git rev-parse  &&
+	test_cmp_rev $expected_merge_tree HEAD^{tree} &&
+	cat >expect <<-EOF &&
+	$(git rev-parse tags/one^{tree}) $before_octopus
+	one
+	$EMPTY
+	edited
+	$EMPTY
+	$expected_two_tree $before_octopus
+	two
+	$EMPTY
+	edited
+	$EMPTY
+	$(git rev-parse tags/three^{tree}) $before_octopus
+	three
+	EOF
+	git log --no-walk=unsorted \
+		--pretty=format:"%T %P%n%B" HEAD^ HEAD^2 HEAD^3 >actual &&
+	test_cmp expect actual
 '
 
 test_done
