@@ -583,7 +583,7 @@ static int do_recursive_merge(struct repository *r,
 			      struct commit *base, struct commit *next,
 			      const char *base_label, const char *next_label,
 			      struct object_id *head, struct strbuf *msgbuf,
-			      struct replay_opts *opts)
+			      struct replay_opts *opts, int quiet)
 {
 	struct merge_options o;
 	struct tree *next_tree, *base_tree, *head_tree;
@@ -614,7 +614,7 @@ static int do_recursive_merge(struct repository *r,
 	clean = merge_trees(&o,
 			    head_tree,
 			    next_tree, base_tree);
-	if (is_rebase_i(opts) && clean <= 0)
+	if (is_rebase_i(opts) && !quiet && clean <= 0)
 		fputs(o.obuf.buf, stdout);
 	strbuf_release(&o.obuf);
 	if (clean < 0) {
@@ -631,7 +631,7 @@ static int do_recursive_merge(struct repository *r,
 		return error(_("%s: Unable to write new index file"),
 			_(action_name(opts)));
 
-	if (!clean)
+	if (!clean && msgbuf)
 		append_conflicts_hint(r->index, msgbuf,
 				      opts->default_msg_cleanup);
 
@@ -1872,7 +1872,7 @@ static int do_pick_commit(struct repository *r,
 		res = -1;
 	else if (!opts->strategy || !strcmp(opts->strategy, "recursive") || command == TODO_REVERT) {
 		res = do_recursive_merge(r, base, next, base_label, next_label,
-					 &head, &msgbuf, opts);
+					 &head, &msgbuf, opts, 0);
 		if (res < 0)
 			goto leave;
 
@@ -3298,6 +3298,112 @@ static struct commit *lookup_label(const char *label, int len,
 	return commit;
 }
 
+static void write_merge_head(struct repository *r, struct commit_list *heads)
+{
+	struct strbuf buf = STRBUF_INIT;
+	struct commit_list *p;
+
+	for (p = heads; p; p = p->next)
+		strbuf_addf(&buf, "%s\n", oid_to_hex(&p->item->object.oid));
+
+	write_message(buf.buf, buf.len, git_path_merge_head(r), 0);
+	write_message("no-ff", 5, git_path_merge_mode(r), 0);
+}
+
+enum merge_action {
+	FAST_FORWARD = 1,
+	REUSE_TREE,
+	CHERRY_PICK
+};
+
+/*
+ * Try and reuse the tree of or cherry-pick the existing merge commit
+ * Returns:
+ *   0 - success
+ *  <0 - error
+ *  >0 - need to do a real merge
+ */
+static int try_to_avoid_merge(struct repository *r, struct replay_opts* opts,
+			      enum merge_action action, struct commit *commit,
+			      struct commit *old, struct commit *new,
+			      struct commit *head)
+{
+
+	int res = 0;
+	if (action == REUSE_TREE) {
+		if (reset_index_and_worktree(r, opts, &commit->object.oid, 0))
+			return -1;
+	} else {
+		fprintf(stderr, "trying to cherry-pick merge\n");
+		/* Ensure index and worktree match the merge head */
+		if (!oideq(&head->object.oid, &new->object.oid) &&
+		    reset_index_and_worktree(r, opts, &new->object.oid, 0))
+			return -1;
+		res = do_recursive_merge(r, old, commit, "", "",
+					 &new->object.oid, NULL, opts, 1);
+		/*
+		 * If there were conflicts or there was an error and we have
+		 * checked out a different head then reset the index and
+		 * worktree
+		 */
+		if (res > 0 ||
+		    (res && !oideq(&head->object.oid, &new->object.oid)))
+			reset_index_and_worktree(r, opts, &head->object.oid, 1);
+	}
+
+	if (!res)
+		fprintf(stderr, "%s\n", action == REUSE_TREE ?
+			"reused merge tree" : "cherry-picked merge");
+	return res;
+}
+
+static int can_avoid_merge(struct repository *r, struct replay_opts *opts,
+			   struct commit *commit,
+			   struct commit_list *new_parents,
+			   struct commit **old_parent,
+			   struct commit **new_parent)
+{
+	struct commit_list *p, *q;
+	struct commit *old = NULL, *new = NULL;
+	int can_fast_forward = 1, can_reuse_tree = 1;
+
+	if (!(opts->allow_ff && commit && commit->parents))
+		return 0;
+
+	for (p = commit->parents, q = new_parents;
+	     p && q;
+	     p = p->next, q = q->next) {
+		if (!oideq(&p->item->object.oid, &q->item->object.oid)) {
+			can_fast_forward = 0;
+			if (repo_parse_commit(r, p->item) ||
+			    repo_parse_commit(r, q->item))
+				return -1;
+			if (!oideq(get_commit_tree_oid(p->item),
+				   get_commit_tree_oid(q->item))) {
+				can_reuse_tree = 0;
+				if (old) /* More than one parent tree differs */
+					return 0;
+				old = p->item;
+				new = q->item;
+			}
+		}
+	}
+	/*
+	 * If there are differing number of parents then we must do a proper
+	 * merge
+	 */
+	if (p || q)
+		return 0;
+
+	if (can_fast_forward)
+		return FAST_FORWARD;
+	else if (can_reuse_tree)
+		return REUSE_TREE;
+	*old_parent = old;
+	*new_parent = new;
+	return CHERRY_PICK;
+}
+
 static int do_merge(struct repository *r,
 		    struct commit *commit,
 		    const char *arg, int arg_len,
@@ -3306,14 +3412,14 @@ static int do_merge(struct repository *r,
 	int run_commit_flags = (flags & TODO_EDIT_MERGE_MSG) ?
 		EDIT_MSG | VERIFY_MSG : 0;
 	struct strbuf ref_name = STRBUF_INIT;
-	struct commit *head_commit, *merge_commit, *i;
+	struct commit *head_commit, *merge_commit, *i, *old, *new;
 	struct commit_list *bases, *j, *reversed = NULL;
-	struct commit_list *to_merge = NULL, **tail = &to_merge;
+	struct commit_list *new_parents, *to_merge = NULL, **tail = &to_merge;
 	const char *strategy = !opts->xopts_nr &&
 		(!opts->strategy || !strcmp(opts->strategy, "recursive")) ?
 		NULL : opts->strategy;
 	struct merge_options o;
-	int merge_arg_len, oneline_offset, can_fast_forward, ret, k;
+	int merge_arg_len, oneline_offset, avoid_merge, ret, k;
 	static struct lock_file lock;
 	const char *p;
 
@@ -3425,35 +3531,18 @@ static int do_merge(struct repository *r,
 	}
 
 	/*
-	 * If HEAD is not identical to the first parent of the original merge
-	 * commit, we cannot fast-forward.
+	 * If all the parents are unchanged then we can fast-forward. If all the
+	 * parent trees are unchanged we can reuse the tree and if only one of
+	 * the parent trees has changed we can try to cherry-pick the existing
+	 * to preserve semantic and textual conflict resolutions.
 	 */
-	can_fast_forward = opts->allow_ff && commit && commit->parents &&
-		oideq(&commit->parents->item->object.oid,
-		      &head_commit->object.oid);
-
-	/*
-	 * If any merge head is different from the original one, we cannot
-	 * fast-forward.
-	 */
-	if (can_fast_forward) {
-		struct commit_list *p = commit->parents->next;
-
-		for (j = to_merge; j && p; j = j->next, p = p->next)
-			if (!oideq(&j->item->object.oid,
-				   &p->item->object.oid)) {
-				can_fast_forward = 0;
-				break;
-			}
-		/*
-		 * If the number of merge heads differs from the original merge
-		 * commit, we cannot fast-forward.
-		 */
-		if (j || p)
-			can_fast_forward = 0;
-	}
-
-	if (can_fast_forward) {
+	new_parents = to_merge;
+	commit_list_insert(head_commit, &new_parents);
+	avoid_merge = can_avoid_merge(r, opts, commit, new_parents, &old, &new);
+	if (avoid_merge < 0) {
+		ret = avoid_merge;
+		goto leave_merge;
+	} else if (avoid_merge == FAST_FORWARD) {
 		rollback_lock_file(&lock);
 		ret = fast_forward_to(r, &commit->object.oid,
 				      &head_commit->object.oid, 0, opts);
@@ -3462,6 +3551,20 @@ static int do_merge(struct repository *r,
 			goto fast_forward_edit;
 		}
 		goto leave_merge;
+	} else if (avoid_merge) {
+		rollback_lock_file(&lock);
+		ret = try_to_avoid_merge(r, opts, avoid_merge, commit, old, new,
+					 head_commit);
+		if (ret < 0) {
+			goto leave_merge;
+		} else if (!ret) {
+			write_merge_head(r, to_merge);
+			goto fast_forward_edit;
+		} else if (repo_hold_locked_index(r, &lock,
+						  LOCK_REPORT_ON_ERROR) < 0) {
+			ret = -1;
+			goto leave_merge;
+		}
 	}
 
 	if (strategy || to_merge->next) {
@@ -3522,9 +3625,7 @@ static int do_merge(struct repository *r,
 		goto leave_merge;
 	}
 
-	write_message(oid_to_hex(&merge_commit->object.oid), the_hash_algo->hexsz,
-		      git_path_merge_head(r), 0);
-	write_message("no-ff", 5, git_path_merge_mode(r), 0);
+	write_merge_head(r, to_merge);
 
 	for (j = bases; j; j = j->next)
 		commit_list_insert(j->item, &reversed);
