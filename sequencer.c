@@ -3709,6 +3709,65 @@ static const char *reflog_message(struct replay_opts *opts,
 	return buf.buf;
 }
 
+/*
+ * If reset_unmerged is not set then error out if there are any unmerged index
+ * entries
+ */
+static int reset_index_and_worktree(struct repository *r,
+				    struct replay_opts *opts,
+				    const char *name,
+				    struct object_id *oid,
+				    int reset_unmerged)
+{
+	struct lock_file lock = LOCK_INIT;
+	struct tree_desc desc = { 0 };
+	struct tree *tree;
+	struct unpack_trees_options unpack_tree_opts = { 0 };
+	int ret = 0;
+
+	if (repo_hold_locked_index(r, &lock, LOCK_REPORT_ON_ERROR) < 0)
+		return -1;
+
+	setup_unpack_trees_porcelain(&unpack_tree_opts, "reset");
+	unpack_tree_opts.head_idx = 1;
+	unpack_tree_opts.src_index = r->index;
+	unpack_tree_opts.dst_index = r->index;
+	unpack_tree_opts.fn = oneway_merge;
+	unpack_tree_opts.merge = 1;
+	unpack_tree_opts.update = 1;
+	unpack_tree_opts.preserve_ignored = 0; /* FIXME: !overwrite_ignore */
+	unpack_tree_opts.skip_cache_tree_update = 1;
+	init_checkout_metadata(&unpack_tree_opts.meta, name, oid, NULL);
+
+	if (repo_read_index_unmerged(r) && !reset_unmerged) {
+		ret = error_resolve_conflict(_(action_name(opts)));
+		goto cleanup;
+	}
+
+	if (!fill_tree_descriptor(r, &desc, oid)) {
+		ret = error(_("failed to find tree of %s"), oid_to_hex(oid));
+		goto cleanup;
+	}
+
+	if (unpack_trees(1, &desc, &unpack_tree_opts)) {
+		ret = -1;
+		goto cleanup;
+	}
+
+	tree = parse_tree_indirect(oid);
+	prime_cache_tree(r, r->index, tree);
+
+	if (write_locked_index(r->index, &lock, COMMIT_LOCK) < 0)
+		ret = error(_("could not write index"));
+
+cleanup:
+	free((void *)desc.buffer);
+	if (ret < 0)
+		rollback_lock_file(&lock);
+	clear_unpack_trees_porcelain(&unpack_tree_opts);
+	return ret;
+}
+
 static struct commit *lookup_label(struct repository *r, const char *label,
 				   int len, struct strbuf *buf)
 {
@@ -3737,14 +3796,7 @@ static int do_reset(struct repository *r,
 {
 	struct strbuf ref_name = STRBUF_INIT;
 	struct object_id oid;
-	struct lock_file lock = LOCK_INIT;
-	struct tree_desc desc = { 0 };
-	struct tree *tree;
-	struct unpack_trees_options unpack_tree_opts = { 0 };
 	int ret = 0;
-
-	if (repo_hold_locked_index(r, &lock, LOCK_REPORT_ON_ERROR) < 0)
-		return -1;
 
 	if (len == 10 && !strncmp("[new root]", name, len)) {
 		if (!opts->have_squash_onto) {
@@ -3778,48 +3830,14 @@ static int do_reset(struct repository *r,
 		oid = commit->object.oid;
 	}
 
-	setup_unpack_trees_porcelain(&unpack_tree_opts, "reset");
-	unpack_tree_opts.head_idx = 1;
-	unpack_tree_opts.src_index = r->index;
-	unpack_tree_opts.dst_index = r->index;
-	unpack_tree_opts.fn = oneway_merge;
-	unpack_tree_opts.merge = 1;
-	unpack_tree_opts.update = 1;
-	unpack_tree_opts.preserve_ignored = 0; /* FIXME: !overwrite_ignore */
-	unpack_tree_opts.skip_cache_tree_update = 1;
-	init_checkout_metadata(&unpack_tree_opts.meta, name, &oid, NULL);
-
-	if (repo_read_index_unmerged(r)) {
-		ret = error_resolve_conflict(action_name(opts));
-		goto cleanup;
-	}
-
-	if (!fill_tree_descriptor(r, &desc, &oid)) {
-		ret = error(_("failed to find tree of %s"), oid_to_hex(&oid));
-		goto cleanup;
-	}
-
-	if (unpack_trees(1, &desc, &unpack_tree_opts)) {
-		ret = -1;
-		goto cleanup;
-	}
-
-	tree = parse_tree_indirect(&oid);
-	prime_cache_tree(r, r->index, tree);
-
-	if (write_locked_index(r->index, &lock, COMMIT_LOCK) < 0)
-		ret = error(_("could not write index"));
+	ret = reset_index_and_worktree(r, opts, name, &oid, 0);
 
 	if (!ret)
 		ret = update_ref(reflog_message(opts, "reset", "'%.*s'",
 						len, name), "HEAD", &oid,
 				 NULL, 0, UPDATE_REFS_MSG_ON_ERR);
-cleanup:
-	free((void *)desc.buffer);
-	if (ret < 0)
-		rollback_lock_file(&lock);
+ cleanup:
 	strbuf_release(&ref_name);
-	clear_unpack_trees_porcelain(&unpack_tree_opts);
 	return ret;
 }
 
