@@ -46,6 +46,31 @@ test_expect_success '"list" all worktrees from linked' '
 	test_cmp expect actual
 '
 
+test_expect_success '"list" all worktrees from linked quotes paths' '
+	: Check path with trailing newline if possible to test that the rest \
+	  of the worktree code can handle such names &&
+	if test_have_prereq MINGW
+	then
+		worktree_path="$(pwd)/a linked worktree " &&
+		quoted_worktree_path="\"$(pwd)/a linked worktree \""
+	else
+		worktree_path="$(printf "%s/a\tlinked\nworktree\nx" "$(pwd)")" &&
+		worktree_path="${worktree_path%x}" &&
+		quoted_worktree_path="\"$(pwd)/a\tlinked\nworktree\n\""
+	fi &&
+	printf "%s %s %s\n" "$(git rev-parse --show-toplevel)" \
+		"$(git rev-parse --short HEAD)" \
+		"[$(git symbolic-ref --short HEAD)]" >expect &&
+	test_when_finished "rm -rf \"$worktree_path\" out actual expect && \
+				git worktree prune" &&
+	git worktree add --detach "$worktree_path" master &&
+	printf "%s %s (detached HEAD)\n" "$quoted_worktree_path" \
+		"$(git rev-parse --short HEAD)" >>expect &&
+	git -C "$worktree_path" worktree list >out &&
+	sed "s/  */ /g" <out >actual &&
+	test_cmp expect actual
+'
+
 test_expect_success '"list" all worktrees --porcelain' '
 	echo "worktree $(git rev-parse --show-toplevel)" >expect &&
 	echo "HEAD $(git rev-parse HEAD)" >>expect &&

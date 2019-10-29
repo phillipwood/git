@@ -6,6 +6,7 @@
 #include "parse-options.h"
 #include "argv-array.h"
 #include "branch.h"
+#include "quote.h"
 #include "refs.h"
 #include "run-command.h"
 #include "sigchain.h"
@@ -631,8 +632,14 @@ static void measure_widths(struct worktree **wt, int *abbrev, int *maxlen)
 	int i;
 
 	for (i = 0; wt[i]; i++) {
+		struct strbuf quoted_path = STRBUF_INIT;
 		int sha1_len;
-		int path_len = strlen(wt[i]->path);
+		int path_len;
+
+		quote_c_style(wt[i]->path, &quoted_path, NULL, 0);
+		free(wt[i]->path);
+		path_len = (int)quoted_path.len;
+		wt[i]->path = strbuf_detach(&quoted_path, NULL);
 
 		if (path_len > *maxlen)
 			*maxlen = path_len;
