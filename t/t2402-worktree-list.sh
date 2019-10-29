@@ -86,6 +86,28 @@ test_expect_success '"list" all worktrees --porcelain' '
 	test_cmp expect actual
 '
 
+test_expect_success '"list" all worktrees --porcelain -z' '
+	test_when_finished "rm -rf here _actual actual expect &&
+				git worktree prune" &&
+	printf "worktree %sQHEAD %sQbranch %sQQ" \
+		"$(git rev-parse --show-toplevel)" \
+		"$(git rev-parse HEAD)" \
+		"$(git symbolic-ref HEAD)" >expect &&
+	git worktree add --detach here master &&
+	printf "worktree %sQHEAD %sQdetachedQQ" \
+		"$(git -C here rev-parse --show-toplevel)" \
+		"$(git rev-parse HEAD)" >>expect &&
+	git worktree list --porcelain -z >_actual &&
+	cat _actual | tr "\0" Q >actual	&&
+	test_cmp expect actual
+'
+
+test_expect_success '"list" -z fails without --porcelain' '
+	test_when_finished "rm -rf here && git worktree prune" &&
+	git worktree add --detach here master &&
+	test_must_fail git worktree list -z
+'
+
 test_expect_success 'bare repo setup' '
 	git init --bare bare1 &&
 	echo "data" >file1 &&

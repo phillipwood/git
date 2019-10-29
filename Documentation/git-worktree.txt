@@ -10,7 +10,7 @@ SYNOPSIS
 --------
 [verse]
 'git worktree add' [-f] [--detach] [--checkout] [--lock] [-b <new-branch>] <path> [<commit-ish>]
-'git worktree list' [--porcelain]
+'git worktree list' [--porcelain [-z]]
 'git worktree lock' [--reason <string>] <worktree>
 'git worktree move' <worktree> <new-path>
 'git worktree prune' [-n] [-v] [--expire <expire>]
@@ -179,7 +179,13 @@ This can also be set up as the default behaviour by using the
 --porcelain::
 	With `list`, output in an easy-to-parse format for scripts.
 	This format will remain stable across Git versions and regardless of user
-	configuration.  See below for details.
+	configuration.  It is recommended to combine this with `-z`.
+	See below for details.
+
+-z::
+	When `--porcelain` is specified with `list` terminate each line with a
+	NUL rather than a newline. This makes it possible to parse the output
+	when a worktree path contains a newline character.
 
 -q::
 --quiet::
@@ -330,7 +336,8 @@ $ git worktree list
 
 Porcelain Format
 ~~~~~~~~~~~~~~~~
-The porcelain format has a line per attribute.  Attributes are listed with a
+The porcelain format has a line per attribute.  If `-z` is given then the lines
+are terminated with NUL rather than a newline.  Attributes are listed with a
 label and value separated by a single space.  Boolean attributes (like 'bare'
 and 'detached') are listed as a label only, and are only present if and only
 if the value is true.  The first attribute of a worktree is always `worktree`,

@@ -586,19 +586,25 @@ static int add(int ac, const char **av, const char *prefix)
 	return add_worktree(path, branch, &opts);
 }
 
-static void show_worktree_porcelain(struct worktree *wt)
+static void show_worktree_porcelain(struct worktree *wt, int line_terminator)
 {
-	printf("worktree %s\n", wt->path);
-	if (wt->is_bare)
-		printf("bare\n");
-	else {
-		printf("HEAD %s\n", oid_to_hex(&wt->head_oid));
-		if (wt->is_detached)
-			printf("detached\n");
-		else if (wt->head_ref)
-			printf("branch %s\n", wt->head_ref);
+	printf("worktree %s", wt->path);
+	fputc(line_terminator, stdout);
+	if (wt->is_bare) {
+		printf("bare");
+		fputc(line_terminator, stdout);
+	} else {
+		printf("HEAD %s", oid_to_hex(&wt->head_oid));
+		fputc(line_terminator, stdout);
+		if (wt->is_detached) {
+			printf("detached");
+			fputc(line_terminator, stdout);
+		} else if (wt->head_ref) {
+			printf("branch %s", wt->head_ref);
+			fputc(line_terminator, stdout);
+		}
 	}
-	printf("\n");
+	fputc(line_terminator, stdout);
 }
 
 static void show_worktree(struct worktree *wt, int path_maxlen, int abbrev_len)
@@ -652,16 +658,21 @@ static void measure_widths(struct worktree **wt, int *abbrev, int *maxlen)
 static int list(int ac, const char **av, const char *prefix)
 {
 	int porcelain = 0;
+	int line_terminator = '\n';
 
 	struct option options[] = {
 		OPT_BOOL(0, "porcelain", &porcelain, N_("machine-readable output")),
+		OPT_SET_INT('z', NULL, &line_terminator,
+			    N_("fields are separated with NUL character"), '\0'),
 		OPT_END()
 	};
 
 	ac = parse_options(ac, av, prefix, options, worktree_usage, 0);
 	if (ac)
 		usage_with_options(worktree_usage, options);
-	else {
+	else if (!line_terminator && !porcelain) {
+		die(_("'-z' requires '--porcelain'"));
+	} else {
 		struct worktree **worktrees = get_worktrees(GWT_SORT_LINKED);
 		int path_maxlen = 0, abbrev = DEFAULT_ABBREV, i;
 
@@ -670,7 +681,8 @@ static int list(int ac, const char **av, const char *prefix)
 
 		for (i = 0; worktrees[i]; i++) {
 			if (porcelain)
-				show_worktree_porcelain(worktrees[i]);
+				show_worktree_porcelain(worktrees[i],
+							line_terminator);
 			else
 				show_worktree(worktrees[i], path_maxlen, abbrev);
 		}
