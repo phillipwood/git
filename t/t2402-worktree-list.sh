@@ -51,8 +51,8 @@ test_expect_success '"list" all worktrees from linked quotes paths' '
 	  of the worktree code can handle such names &&
 	if test_have_prereq MINGW
 	then
-		worktree_path="$(pwd)/a linked worktree " &&
-		quoted_worktree_path="\"$(pwd)/a linked worktree \""
+		worktree_path="$(pwd)/a linked worktree" &&
+		quoted_worktree_path="\"$(pwd)/a linked worktree\""
 	else
 		worktree_path="$(printf "%s/a\tlinked\nworktree\nx" "$(pwd)")" &&
 		worktree_path="${worktree_path%x}" &&
@@ -107,6 +107,83 @@ test_expect_success '"list" -z fails without --porcelain' '
 	test_when_finished "rm -rf here && git worktree prune" &&
 	git worktree add --detach here master &&
 	test_must_fail git worktree list -z
+'
+
+test_expect_success '"list" --porcelain --git-path from main worktree' '
+	test_when_finished "rm -rf here _actual actual expect && \
+		git worktree prune" &&
+	mkdir subdir &&
+	git worktree add --detach here master &&
+	GIT_INDEX_FILE=.git/tmp-index git -C subdir worktree list --porcelain \
+		--git-path=index \
+		--git-path=hooks/post-checkout >_actual &&
+	test_config extensions.worktreeConfig true &&
+	test_config --worktree core.hooksPath "$(pwd)"/my/hooks &&
+	git -C subdir worktree list --porcelain \
+		--git-path=index \
+		--git-path=hooks/post-checkout >>_actual &&
+	test_config -C here --worktree core.hooksPath "$(pwd)"/other/hooks &&
+	git -C subdir worktree list --porcelain \
+		--git-path=my-script-state \
+		--git-path=refs/heads/master \
+		--git-path=hooks/post-checkout >>_actual &&
+	grep ^git-path _actual >actual &&
+	cat >expect <<-EOF &&
+	git-path ../.git/tmp-index
+	git-path ../.git/hooks/post-checkout
+	git-path ../.git/worktrees/here/index
+	git-path ../.git/hooks/post-checkout
+	git-path ../.git/index
+	git-path $(pwd)/my/hooks/post-checkout
+	git-path ../.git/worktrees/here/index
+	git-path ../.git/hooks/post-checkout
+	git-path ../.git/my-script-state
+	git-path ../.git/refs/heads/master
+	git-path $(pwd)/my/hooks/post-checkout
+	git-path ../.git/worktrees/here/my-script-state
+	git-path ../.git/refs/heads/master
+	git-path $(pwd)/other/hooks/post-checkout
+	EOF
+	test_cmp expect actual
+'
+
+test_expect_success '"list" --porcelain --git-path from linked worktree' '
+	test_when_finished "rm -rf here _actual actual expect && \
+		git worktree prune" &&
+	git worktree add --detach here master &&
+	mkdir here/subdir &&
+	GIT_INDEX_FILE="$(git -C here/subdir rev-parse --git-path tmp-index)" \
+		git -C here/subdir worktree list --porcelain \
+		--git-path=index \
+		--git-path=hooks/post-checkout >_actual &&
+	test_config extensions.worktreeConfig true &&
+	test_config --worktree core.hooksPath "$(pwd)"/my/hooks &&
+	git -C here/subdir worktree list --porcelain \
+		--git-path=index \
+		--git-path=hooks/post-checkout >>_actual &&
+	test_config -C here --worktree core.hooksPath "$(pwd)"/other/hooks &&
+	git -C here/subdir worktree list --porcelain \
+		--git-path=my-script-state \
+		--git-path=refs/heads/master \
+		--git-path=hooks/post-checkout >>_actual &&
+	grep ^git-path _actual >actual &&
+	cat >expect <<-EOF &&
+	git-path $(pwd)/.git/index
+	git-path $(pwd)/.git/hooks/post-checkout
+	git-path $(pwd)/.git/worktrees/here/tmp-index
+	git-path $(pwd)/.git/hooks/post-checkout
+	git-path $(pwd)/.git/index
+	git-path $(pwd)/my/hooks/post-checkout
+	git-path $(pwd)/.git/worktrees/here/index
+	git-path $(pwd)/.git/hooks/post-checkout
+	git-path $(pwd)/.git/my-script-state
+	git-path $(pwd)/.git/refs/heads/master
+	git-path $(pwd)/my/hooks/post-checkout
+	git-path $(pwd)/.git/worktrees/here/my-script-state
+	git-path $(pwd)/.git/refs/heads/master
+	git-path $(pwd)/other/hooks/post-checkout
+	EOF
+	test_cmp expect actual
 '
 
 test_expect_success 'bare repo setup' '

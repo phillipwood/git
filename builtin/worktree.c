@@ -586,8 +586,36 @@ static int add(int ac, const char **av, const char *prefix)
 	return add_worktree(path, branch, &opts);
 }
 
-static void show_worktree_porcelain(struct worktree *wt, int line_terminator)
+struct show_git_path_context {
+	const char *prefix;
+	struct worktree *worktree;
+	int line_terminator;
+};
+
+static int show_git_path(struct string_list_item *item, void *data)
 {
+	struct show_git_path_context *ctx = data;
+	struct strbuf buf = STRBUF_INIT;
+
+	printf("git-path %s",
+	       relative_path(worktree_git_path(ctx->worktree,
+					       "%s", item->string),
+			     ctx->prefix, &buf));
+	putc(ctx->line_terminator, stdout);
+
+	return 0;
+}
+
+static void show_worktree_porcelain(struct worktree *wt, const char *prefix,
+				    struct string_list *git_path_list,
+				    int line_terminator)
+{
+	struct show_git_path_context ctx = {
+		.prefix = prefix,
+		.worktree = wt,
+		.line_terminator = line_terminator
+	};
+
 	printf("worktree %s", wt->path);
 	fputc(line_terminator, stdout);
 	if (wt->is_bare) {
@@ -617,6 +645,8 @@ static void show_worktree_porcelain(struct worktree *wt, int line_terminator)
 
 		}
 	}
+	for_each_string_list(git_path_list, show_git_path, &ctx);
+
 	fputc(line_terminator, stdout);
 }
 
@@ -673,11 +703,14 @@ static int list(int ac, const char **av, const char *prefix)
 {
 	int porcelain = 0;
 	int line_terminator = '\n';
+	struct string_list git_path_list = STRING_LIST_INIT_NODUP;
 
 	struct option options[] = {
 		OPT_BOOL(0, "porcelain", &porcelain, N_("machine-readable output")),
 		OPT_SET_INT('z', NULL, &line_terminator,
 			    N_("fields are separated with NUL character"), '\0'),
+		OPT_STRING_LIST(0, "git-path", &git_path_list, N_("path"),
+				N_("resolve path within worktree's git directory")),
 		OPT_END()
 	};
 
@@ -695,7 +728,8 @@ static int list(int ac, const char **av, const char *prefix)
 
 		for (i = 0; worktrees[i]; i++) {
 			if (porcelain)
-				show_worktree_porcelain(worktrees[i],
+				show_worktree_porcelain(worktrees[i], prefix,
+							&git_path_list,
 							line_terminator);
 			else
 				show_worktree(worktrees[i], path_maxlen, abbrev);
