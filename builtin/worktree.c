@@ -608,6 +608,15 @@ static void show_worktree_porcelain(struct worktree *wt, int line_terminator)
 		fputs("current", stdout);
 		fputc(line_terminator, stdout);
 	}
+	if (!is_main_worktree(wt)) {
+		const char *lock_reason = worktree_lock_reason(wt);
+
+		if (lock_reason) {
+			printf("locked %s", lock_reason);
+			fputc(line_terminator, stdout);
+
+		}
+	}
 	fputc(line_terminator, stdout);
 }
 
