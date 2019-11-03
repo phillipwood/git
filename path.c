@@ -378,20 +378,21 @@ void report_linked_checkout_garbage(void)
 }
 
 static void adjust_git_path(const struct repository *repo,
-			    struct strbuf *buf, int git_dir_len)
+			    const struct worktree *wt, struct strbuf *buf,
+			    int git_dir_len)
 {
 	const char *base = buf->buf + git_dir_len;
 	if (is_dir_file(base, "info", "grafts"))
 		strbuf_splice(buf, 0, buf->len,
 			      repo->graft_file, strlen(repo->graft_file));
-	else if (!strcmp(base, "index"))
+	else if (!strcmp(base, "index") && (!wt || wt->is_current))
 		strbuf_splice(buf, 0, buf->len,
 			      repo->index_file, strlen(repo->index_file));
 	else if (dir_prefix(base, "objects"))
 		replace_dir(buf, git_dir_len + 7, repo->objects->odb->path);
 	else if (git_hooks_path && dir_prefix(base, "hooks"))
 		replace_dir(buf, git_dir_len + 5, git_hooks_path);
-	else if (repo->different_commondir)
+	else if (repo->different_commondir || (wt && !wt->is_current))
 		update_common_dir(buf, git_dir_len, repo->commondir);
 }
 
@@ -417,8 +418,7 @@ static void do_git_path(const struct repository *repo,
 		strbuf_addch(buf, '/');
 	gitdir_len = buf->len;
 	strbuf_vaddf(buf, fmt, args);
-	if (!wt)
-		adjust_git_path(repo, buf, gitdir_len);
+	adjust_git_path(repo, wt, buf, gitdir_len);
 	strbuf_cleanup_path(buf);
 }
 
