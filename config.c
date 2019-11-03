@@ -20,6 +20,7 @@
 #include "dir.h"
 #include "color.h"
 #include "refs.h"
+#include "worktree.h"
 
 struct config_source {
 	struct config_source *prev;
@@ -1729,7 +1730,12 @@ static int do_git_config_sequence(const struct config_options *opts,
 	 * But let's not complicate things before it's actually needed.
 	 */
 	if (!opts->ignore_worktree && repository_format_worktree_config) {
-		char *path = git_pathdup("config.worktree");
+		char *path;
+		if (!opts->worktree || opts->worktree->is_current)
+			path = git_pathdup("config.worktree");
+		else
+			path = xstrdup(worktree_git_path(opts->worktree,
+							 "config.worktree"));
 		if (!access_or_die(path, R_OK, 0))
 			ret += git_config_from_file(fn, path, data);
 		free(path);
