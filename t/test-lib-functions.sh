@@ -375,13 +375,20 @@ test_modebits () {
 # Unset a configuration variable, but don't fail if it doesn't exist.
 test_unconfig () {
 	config_dir=
+	config_worktree=
 	if test "$1" = -C
 	then
 		shift
 		config_dir=$1
 		shift
 	fi
-	git ${config_dir:+-C "$config_dir"} config --unset-all "$@"
+	if test "$1" = --worktree
+	then
+		config_worktree=$1
+		shift
+	fi
+	git ${config_dir:+-C "$config_dir"} config $config_worktree \
+		--unset-all "$@"
 	config_status=$?
 	case "$config_status" in
 	5) # ok, nothing to unset
@@ -394,14 +401,21 @@ test_unconfig () {
 # Set git config, automatically unsetting it after the test is over.
 test_config () {
 	config_dir=
+	config_worktree=
 	if test "$1" = -C
 	then
 		shift
 		config_dir=$1
 		shift
 	fi
-	test_when_finished "test_unconfig ${config_dir:+-C '$config_dir'} '$1'" &&
-	git ${config_dir:+-C "$config_dir"} config "$@"
+	if test "$1" = --worktree
+	then
+		config_worktree=$1
+		shift
+	fi
+	test_when_finished "test_unconfig ${config_dir:+-C '$config_dir'} \
+		$config_worktree '$1'" &&
+	git ${config_dir:+-C "$config_dir"} config $config_worktree "$@"
 }
 
 test_config_global () {

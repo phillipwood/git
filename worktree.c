@@ -1,4 +1,5 @@
 #include "cache.h"
+#include "config.h"
 #include "repository.h"
 #include "refs.h"
 #include "strbuf.h"
@@ -58,15 +59,6 @@ static struct worktree *get_main_worktree(void)
 
 	worktree = xcalloc(1, sizeof(*worktree));
 	worktree->path = strbuf_detach(&worktree_path, NULL);
-	/*
-	 * NEEDSWORK: If this function is called from a secondary worktree and
-	 * config.worktree is present, is_bare_repository_cfg will reflect the
-	 * contents of config.worktree, not the contents of the main worktree.
-	 * This means that worktree->is_bare may be set to 0 even if the main
-	 * worktree is configured to be bare.
-	 */
-	worktree->is_bare = (is_bare_repository_cfg == 1) ||
-		is_bare_repository();
 	add_head_info(worktree);
 
 	strbuf_release(&path);
@@ -126,6 +118,46 @@ static void mark_current_worktree(struct worktree **worktrees)
 	free(git_dir);
 }
 
+static int bare_repo_cb(const char *name, const char *value, void *data)
+{
+	struct worktree *wt = data;
+
+	if (!strcmp(name, "core.bare"))
+		wt->is_bare = git_config_bool(name, value);
+
+	return 0;
+}
+
+static void mark_bare_worktrees(struct worktree **worktrees)
+{
+	for (; *worktrees; worktrees++) {
+		struct worktree *wt = *worktrees;
+		/*
+		 * If there are per-worktree config files and the worktree is
+		 * not the current worktree we need to read its config to get
+		 * the correct value
+		 */
+		if (repository_format_worktree_config && !wt->is_current) {
+			if (worktree_config(wt, bare_repo_cb, wt))
+				warning(_("cannot parse config for worktree "
+					  "'%s', using current config instead"),
+					wt->id ? wt->id : "main-worktree");
+			else
+				continue;
+		}
+
+		wt->is_bare = (is_bare_repository_cfg == 1) ||
+			is_bare_repository();
+
+		/*
+		 * If there are no per-worktree config files then we only need
+		 * to check if the main worktree is bare.
+		 */
+		if (!repository_format_worktree_config)
+			break;
+	}
+}
+
 static int compare_worktree(const void *a_, const void *b_)
 {
 	const struct worktree *const *a = a_;
@@ -172,6 +204,7 @@ struct worktree **get_worktrees(unsigned flags)
 		QSORT(list + 1, counter - 1, compare_worktree);
 
 	mark_current_worktree(list);
+	mark_bare_worktrees(list);
 	return list;
 }
 

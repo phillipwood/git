@@ -258,6 +258,9 @@ int git_config_get_split_index(void);
 int git_config_get_max_percent_split_change(void);
 int git_config_get_fsmonitor(void);
 
+/* Read config from a specific worktree */
+int worktree_config(const struct worktree *wt, config_fn_t cb, void *data);
+
 /* This dies if the configured or default date is in the future */
 int git_config_get_expiry(const char *key, const char **output);
 

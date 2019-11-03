@@ -104,6 +104,33 @@ test_expect_success '"list" all worktrees from linked with a bare main' '
 	test_cmp expect actual
 '
 
+test_expect_success '"list" all worktrees --porcelain with bare main and extensions.worktreeConfig' '
+	test_when_finished "rm -rf actual _expect expect there &&\
+		 git -C bare1 config core.bare true && \
+		 git -C bare1 worktree prune" &&
+	test_config -C bare1 extensions.worktreeConfig true &&
+	git -C bare1 worktree add --detach ../there &&
+	test_config -C there --worktree core.bare false &&
+	git -C bare1 worktree list --porcelain >actual &&
+	git -C there worktree list --porcelain >>actual &&
+	test_unconfig -C bare1 core.bare &&
+	test_config -C bare1 --worktree core.bare true &&
+	test_unconfig -C there --worktree core.bare &&
+	git -C bare1 worktree list --porcelain >>actual &&
+	git -C there worktree list --porcelain >>actual &&
+	cat >_expect <<-EOF &&
+	worktree $(git -C bare1 rev-parse --absolute-git-dir)
+	bare
+	
+	worktree $(git -C there rev-parse --show-toplevel)
+	HEAD $(git -C there rev-parse HEAD)
+	detached
+	
+	EOF
+	cat _expect _expect _expect _expect >expect &&
+	test_cmp expect actual
+'
+
 test_expect_success 'bare repo cleanup' '
 	rm -rf bare1
 '

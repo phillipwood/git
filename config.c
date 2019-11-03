@@ -2378,6 +2378,20 @@ void git_die_config(const char *key, const char *err, ...)
 	git_die_config_linenr(key, kv_info->filename, kv_info->linenr);
 }
 
+
+/*  Read config from a specific worktree */
+int worktree_config(const struct worktree *wt, config_fn_t cb, void *data)
+{
+	struct config_options opts = {
+		.respect_includes = 1,
+		.commondir = get_git_common_dir(),
+		.git_dir = get_worktree_git_dir(wt),
+		.worktree = wt
+	};
+
+	return config_with_options(cb, data, NULL, &opts);
+}
+
 /*
  * Find all the stuff for git_config_set() below.
  */
