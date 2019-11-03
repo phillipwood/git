@@ -377,6 +377,35 @@ void report_linked_checkout_garbage(void)
 	strbuf_release(&sb);
 }
 
+static int hooks_path_cb(const char *name, const char *value, void *data)
+{
+	const char **hooks_path = data;
+
+	if (!strcmp(name, "core.hookspath"))
+		return git_config_pathname(hooks_path, name, value);
+
+	return 0;
+}
+
+static int adjust_hooks_path(const struct worktree *wt, struct strbuf *buf,
+			      int git_dir_len)
+{
+	const char *hooks_path = NULL;
+
+	if (repository_format_worktree_config && wt && !wt->is_current) {
+		if (worktree_config(wt, hooks_path_cb, &hooks_path))
+			error(_("could not parse worktree config"));
+	} else {
+		hooks_path = git_hooks_path;
+	}
+	if (hooks_path) {
+		replace_dir(buf, git_dir_len + 5, hooks_path);
+		return 1;
+	}
+
+	return 0;
+}
+
 static void adjust_git_path(const struct repository *repo,
 			    const struct worktree *wt, struct strbuf *buf,
 			    int git_dir_len)
@@ -390,8 +419,9 @@ static void adjust_git_path(const struct repository *repo,
 			      repo->index_file, strlen(repo->index_file));
 	else if (dir_prefix(base, "objects"))
 		replace_dir(buf, git_dir_len + 7, repo->objects->odb->path);
-	else if (git_hooks_path && dir_prefix(base, "hooks"))
-		replace_dir(buf, git_dir_len + 5, git_hooks_path);
+	else if (dir_prefix(base, "hooks") &&
+		 adjust_hooks_path(wt, buf, git_dir_len))
+		;
 	else if (repo->different_commondir || (wt && !wt->is_current))
 		update_common_dir(buf, git_dir_len, repo->commondir);
 }
