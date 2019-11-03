@@ -341,42 +341,27 @@ static int add_worktree(const char *path, const char *refname,
 	write_file(sb.buf, "%s", real_path(sb_git.buf));
 	write_file(sb_git.buf, "gitdir: %s/worktrees/%s",
 		   real_path(get_git_common_dir()), name);
-	/*
-	 * This is to keep resolve_ref() happy. We need a valid HEAD
-	 * or is_git_directory() will reject the directory. Any value which
-	 * looks like an object ID will do since it will be immediately
-	 * replaced by the symbolic-ref or update-ref invocation in the new
-	 * worktree.
-	 */
-	strbuf_reset(&sb);
-	strbuf_addf(&sb, "%s/HEAD", sb_repo.buf);
-	write_file(sb.buf, "%s", oid_to_hex(&null_oid));
 	strbuf_reset(&sb);
 	strbuf_addf(&sb, "%s/commondir", sb_repo.buf);
 	write_file(sb.buf, "../..");
 
-	argv_array_pushf(&child_env, "%s=%s", GIT_DIR_ENVIRONMENT, sb_git.buf);
-	argv_array_pushf(&child_env, "%s=%s", GIT_WORK_TREE_ENVIRONMENT, path);
-	cp.git_cmd = 1;
-
+	strbuf_reset(&sb);
+	strbuf_addf(&sb, "worktrees/%s/HEAD", name);
 	if (!is_branch)
-		argv_array_pushl(&cp.args, "update-ref", "HEAD",
-				 oid_to_hex(&commit->object.oid), NULL);
-	else {
-		argv_array_pushl(&cp.args, "symbolic-ref", "HEAD",
-				 symref.buf, NULL);
-		if (opts->quiet)
-			argv_array_push(&cp.args, "--quiet");
-	}
+		ret = update_ref(NULL, sb.buf, &commit->object.oid, NULL, 0,
+				 UPDATE_REFS_MSG_ON_ERR);
+	else
+		ret = create_symref(sb.buf, symref.buf, NULL);
 
-	cp.env = child_env.argv;
-	ret = run_command(&cp);
 	if (ret)
 		goto done;
 
 	if (opts->checkout) {
-		cp.argv = NULL;
-		argv_array_clear(&cp.args);
+		argv_array_pushf(&child_env, "%s=%s",
+				 GIT_DIR_ENVIRONMENT, sb_git.buf);
+		argv_array_pushf(&child_env, "%s=%s",
+				 GIT_WORK_TREE_ENVIRONMENT, path);
+		cp.git_cmd = 1;
 		argv_array_pushl(&cp.args, "reset", "--hard", NULL);
 		if (opts->quiet)
 			argv_array_push(&cp.args, "--quiet");
