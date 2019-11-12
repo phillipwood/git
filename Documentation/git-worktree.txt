@@ -325,21 +325,22 @@ When extensions.worktreeConfig is enabled, the config file
 LIST OUTPUT FORMAT
 ------------------
 The worktree list command has two output formats.  The default format shows the
-details on a single line with columns.  For example:
+details on a single line with columns, the current worktree is marked with
+`'*'`.  For example:
 
 ------------
 $ git worktree list
-/path/to/bare-source            (bare)
-/path/to/linked-worktree        abcd1234 [master]
-/path/to/other-linked-worktree  1234abc  (detached HEAD)
+ /path/to/bare-source            (bare)
+*/path/to/linked-worktree        abcd1234 [master]
+ /path/to/other-linked-worktree  1234abc  (detached HEAD)
 ------------
 
 Porcelain Format
 ~~~~~~~~~~~~~~~~
 The porcelain format has a line per attribute.  If `-z` is given then the lines
 are terminated with NUL rather than a newline.  Attributes are listed with a
-label and value separated by a single space.  Boolean attributes (like 'bare'
-and 'detached') are listed as a label only, and are only present if and only
+label and value separated by a single space.  Boolean attributes (like 'bare',
+'detached' and 'current') are listed as a label only, and are only present if and only
 if the value is true.  The first attribute of a worktree is always `worktree`,
 an empty line indicates the end of the record.  For example:
 
@@ -351,6 +352,7 @@ bare
 worktree /path/to/linked-worktree
 HEAD abcd1234abcd1234abcd1234abcd1234abcd1234
 branch refs/heads/master
+current
 
 worktree /path/to/other-linked-worktree
 HEAD 1234abc1234abc1234abc1234abc1234abc1234a

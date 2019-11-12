@@ -604,6 +604,10 @@ static void show_worktree_porcelain(struct worktree *wt, int line_terminator)
 			fputc(line_terminator, stdout);
 		}
 	}
+	if (wt->is_current) {
+		fputs("current", stdout);
+		fputc(line_terminator, stdout);
+	}
 	fputc(line_terminator, stdout);
 }
 
@@ -613,7 +617,8 @@ static void show_worktree(struct worktree *wt, int path_maxlen, int abbrev_len)
 	int cur_path_len = strlen(wt->path);
 	int path_adj = cur_path_len - utf8_strwidth(wt->path);
 
-	strbuf_addf(&sb, "%-*s ", 1 + path_maxlen + path_adj, wt->path);
+	strbuf_addf(&sb, "%c%-*s ", wt->is_current ? '*' : ' ',
+		    1 + path_maxlen + path_adj, wt->path);
 	if (wt->is_bare)
 		strbuf_addstr(&sb, "(bare)");
 	else {
