@@ -4,3 +4,7 @@ respect the options passed to rebase when the user commits
 I haven't checked how this affects the shell prompt in contrib yet, I
 suspect it may need changing to cope the presence of CHERRY_PICK_HEAD
 during a rebase.
+
+I'd like to change the existing authorship tests to rely on the "Original
+Author" changes here, but they are a web of hidden interdependencies which is
+hard to untangle.
