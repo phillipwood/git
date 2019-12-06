@@ -1,1 +1,6 @@
-hello
+This has semantic conflicts with ra/rebase-i-more-options as it does not
+respect the options passed to rebase when the user commits
+
+I haven't checked how this affects the shell prompt in contrib yet, I
+suspect it may need changing to cope the presence of CHERRY_PICK_HEAD
+during a rebase.
