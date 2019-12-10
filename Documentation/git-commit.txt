@@ -8,7 +8,7 @@ git-commit - Record changes to the repository
 SYNOPSIS
 --------
 [verse]
-'git commit' [-a | --interactive | --patch] [--amend]
+'git commit' [-a | --interactive | --patch] [--amend | --reword]
 	   [(-c | -C | --fixup | --squash) <commit>] [-F <file> | -m <msg>]
 	   [--allow-empty] [--allow-empty-message] [--no-verify] [-e]
 	   [--reset-author] [--author=<author>] [--date=<date>]
@@ -99,7 +99,7 @@ OPTIONS
 	linkgit:git-rebase[1] for details.
 
 --reset-author::
-	When used with `-C`/`-c`/`--amend` options, or when committing
+	When used with `-C`/`-c`/`--amend`/`--reword` options, or when committing
 	after a conflicting cherry-pick, declare that the authorship of
 	the resulting commit now belongs to the committer. This also
 	renews the author timestamp.
@@ -228,6 +228,16 @@ variable (see linkgit:git-config[1]).
 	Use the selected commit message without launching an editor.
 	For example, `git commit --amend --no-edit` amends a commit
 	without changing its commit message.
+
+--reword::
+	Reword the commit message of the tip of the current branch by
+	replacing it with a new commit. The commit contents will be
+	unchanged even if there are staged changes. This is equivalent
+	to specifying `--amend --only --allow-empty` with no paths.
++
+You should understand the implications of rewriting history if you
+reword a commit that has already been published.  (See the "RECOVERING
+FROM UPSTREAM REBASE" section in linkgit:git-rebase[1].)
 
 --amend::
 	Replace the tip of the current branch by creating a new
