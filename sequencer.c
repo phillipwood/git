@@ -4451,6 +4451,10 @@ static int pick_commits(struct repository *r,
 			if (item->command == TODO_EDIT) {
 				struct commit *commit = item->commit;
 				if (!res) {
+					record_in_rewritten(r,
+							    &item->commit->object.oid,
+							    TODO_EDIT, /* force flush */
+							    &opts->rewritten_head);
 					if (!opts->verbose)
 						term_clear_line();
 					fprintf(stderr,
@@ -4844,6 +4848,53 @@ static int commit_staged_changes(struct repository *r,
 	return 0;
 }
 
+static void continue_record_rewritten(struct repository *r,
+				      struct replay_opts *opts,
+				      struct todo_list *todo_list)
+{
+	struct strbuf line = STRBUF_INIT;
+	struct strbuf buf = STRBUF_INIT;
+	FILE *fp;
+	size_t hexsz = r->hash_algo->hexsz;
+	struct commit *head;
+	struct object_id stopped_oid, head_oid;
+
+	if (!read_oneliner(&buf, rebase_path_stopped_sha(),
+			   READ_ONELINER_SKIP_IF_EMPTY) ||
+	    get_oid_hex(buf.buf, &stopped_oid))
+		return;
+
+	fp = fopen_or_warn(rebase_path_rewritten_list(), "r");
+	if (!fp)
+		goto record;
+
+	if (get_oid_committish("HEAD", &head_oid))
+		goto out;
+	head = lookup_commit_reference(r, &head_oid);
+	if (!head)
+		goto out;
+	while (strbuf_getline(&line, fp) != EOF) {
+		struct object_id oid;
+		struct commit* commit;
+		if (!memcmp(line.buf, buf.buf, hexsz)) {
+			strbuf_reset(&buf);
+			strbuf_add(&buf, line.buf + hexsz + 1, hexsz);
+			get_oid_hex_algop(buf.buf, &oid, r->hash_algo);
+			commit = lookup_commit_reference(r, &oid);
+			if (commit && repo_in_merge_bases(r, commit, head))
+				goto out;
+		}
+	}
+ record:
+	record_in_rewritten(r, &stopped_oid, peek_command(todo_list, 0),
+			    &opts->rewritten_head);
+ out:
+	if (fp)
+		fclose(fp);
+	strbuf_release(&buf);
+	strbuf_release(&line);
+}
+
 int sequencer_continue(struct repository *r, struct replay_opts *opts)
 {
 	struct todo_list todo_list = TODO_LIST_INIT;
@@ -4888,17 +4939,8 @@ int sequencer_continue(struct repository *r, struct replay_opts *opts)
 			goto release_todo_list;
 		}
 		todo_list.current++;
-	} else if (file_exists(rebase_path_stopped_sha())) {
-		struct strbuf buf = STRBUF_INIT;
-		struct object_id oid;
-
-		if (read_oneliner(&buf, rebase_path_stopped_sha(),
-				  READ_ONELINER_SKIP_IF_EMPTY) &&
-		    !get_oid_hex(buf.buf, &oid))
-			record_in_rewritten(r, &oid,
-					    peek_command(&todo_list, 0),
-					    &opts->rewritten_head);
-		strbuf_release(&buf);
+	} else {
+		continue_record_rewritten(r, opts, &todo_list);
 	}
 
 	res = pick_commits(r, &todo_list, opts);

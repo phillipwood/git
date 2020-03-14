@@ -245,8 +245,50 @@ test_expect_success 'git rebase -i (double edit)' '
 	git rebase --continue &&
 	echo rebase >expected.args &&
 	cat >expected.data <<-EOF &&
-	$(git rev-parse D) $(git rev-parse HEAD)
+	$(git rev-parse C) $(git rev-parse HEAD^)
+	$(git rev-parse D) $(git rev-parse HEAD@{2})
+	$(git rev-parse HEAD@{2}) $(git rev-parse HEAD)
 	EOF
+	verify_hook_input
+'
+
+test_expect_success 'git rebase -i (edit amends, then adds commit)' '
+	git reset --hard D &&
+	clear_hook_input &&
+	FAKE_LINES="edit 1 edit 2" git rebase -i B &&
+	git commit --allow-empty -m empty-1 &&
+	git rebase --continue &&
+	git commit --amend -m edited-D &&
+	git commit --amend -m edited-D-2 &&
+	git reset --hard HEAD@{1} &&
+	git commit --allow-empty -m empty-2 &&
+	git rebase --continue &&
+	echo rebase >expected.args &&
+	printf "%s %s\n" >expected.data \
+		$(git rev-parse C        HEAD^^^  \
+				D        HEAD@{5} \
+				HEAD@{5} HEAD^    \
+				HEAD@{4} HEAD@{3}) &&
+	verify_hook_input
+'
+
+test_expect_success 'git rebase -i (fixup follows edit)' '
+	git reset --hard D &&
+	clear_hook_input &&
+	FAKE_LINES="edit 1 fixup 2 edit 3 fixup 4" git rebase -i --root &&
+	git commit --amend -m edited-A &&
+	git rebase --continue &&
+	git commit --allow-empty -m empty &&
+	git rebase --continue &&
+	echo rebase >expected.args &&
+	printf "%s %s\n" >expected.data \
+		$(git rev-parse A	 A        \
+				A        HEAD@{5} \
+				HEAD@{5} HEAD^^   \
+				B        HEAD^^   \
+				C        HEAD^    \
+				HEAD@{2} HEAD     \
+				D        HEAD) &&
 	verify_hook_input
 '
 
@@ -261,6 +303,7 @@ test_expect_success 'git rebase -i (exec)' '
 	git rebase --continue &&
 	echo rebase >expected.args &&
 	cat >expected.data <<-EOF &&
+	$(git rev-parse C) $(git rev-parse C)
 	$(git rev-parse C) $(git rev-parse HEAD^)
 	$(git rev-parse D) $(git rev-parse HEAD)
 	EOF
