@@ -3358,3 +3358,28 @@ int lookup_config(const char **mapping, int nr_mapping, const char *var)
 	}
 	return -1;
 }
+
+char *user_config_path(void)
+{
+	char *user_config = expand_user_path("~/.gitconfig", 0);
+	char *xdg_config = xdg_config_home("config");
+
+	if (!user_config) {
+		/*
+		 * It is unknown if HOME/.gitconfig exists, so we do not know if
+		 * we should write to XDG location; error out even if
+		 * XDG_CONFIG_HOME is set and points at a sane location.
+		 */
+		error(_("$HOME not set"));
+		return NULL;
+	}
+
+	if (access_or_warn(user_config, R_OK, 0) &&
+	    xdg_config && !access_or_warn(xdg_config, R_OK, 0)) {
+		free(user_config);
+		return xdg_config;
+	} else {
+		free(xdg_config);
+		return user_config;
+	}
+}

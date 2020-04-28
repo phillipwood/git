@@ -642,28 +642,11 @@ int cmd_config(int argc, const char **argv, const char *prefix)
 	}
 
 	if (use_global_config) {
-		char *user_config = expand_user_path("~/.gitconfig", 0);
-		char *xdg_config = xdg_config_home("config");
-
-		if (!user_config)
-			/*
-			 * It is unknown if HOME/.gitconfig exists, so
-			 * we do not know if we should write to XDG
-			 * location; error out even if XDG_CONFIG_HOME
-			 * is set and points at a sane location.
-			 */
-			die(_("$HOME not set"));
+		given_config_source.file = user_config_path();
+		if (!given_config_source.file)
+			die(_("unable to determine global config file path"));
 
 		given_config_source.scope = CONFIG_SCOPE_GLOBAL;
-
-		if (access_or_warn(user_config, R_OK, 0) &&
-		    xdg_config && !access_or_warn(xdg_config, R_OK, 0)) {
-			given_config_source.file = xdg_config;
-			free(user_config);
-		} else {
-			given_config_source.file = user_config;
-			free(xdg_config);
-		}
 	}
 	else if (use_system_config) {
 		given_config_source.file = git_etc_gitconfig();

@@ -617,4 +617,10 @@ NORETURN void git_die_config_linenr(const char *key, const char *filename, int l
 	lookup_config(mapping, ARRAY_SIZE(mapping), var)
 int lookup_config(const char **mapping, int nr_mapping, const char *var);
 
+/**
+ * Get the path to the user's global config file. Returns NULL if $HOME is not
+ * set.
+ */
+char *user_config_path(void);
+
 #endif /* CONFIG_H */
