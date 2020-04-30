@@ -24,6 +24,9 @@ static int git_cmd_exists(const char *cmd) {
 	string_list_split(&sl, getenv("PATH"), PATH_SEP, -1);
 	for (i = 0; i < sl.nr; i++) {
 		struct stat st;
+		fprintf(stdout, "checking %s\n",
+			mkpath("%s/git-%s", sl.items[i].string, cmd));
+
 		if (!stat(mkpath("%s/git-%s", sl.items[i].string, cmd), &st)
 #ifndef NO_TRUSTABLE_FILEMODE
 			    && (st.st_mode & S_IXUSR)
@@ -206,9 +209,12 @@ static int get_alias(const char *alias)
 int cmd_alias(int argc, const char **argv, const char *prefix)
 {
 	struct option options[] = { OPT_END() };
+	int i;
 
 	argc = parse_options(argc, argv, prefix, options, alias_usage,
 			     PARSE_OPT_STOP_AT_NON_OPTION);
+	for (i = 0; i < argc; i++)
+		fprintf(stdout, "argv[%d]=|%s|\n", i, argv[i]);
 	if (argc == 1)
 		return get_alias(argv[0]);
 	else if (argc > 1)
