@@ -283,7 +283,7 @@ static const char *gpg_sign_opt_quoted(struct replay_opts *opts)
 	return buf.buf;
 }
 
-int sequencer_remove_state(struct replay_opts *opts)
+int sequencer_remove_state(struct repository *r, struct replay_opts *opts)
 {
 	struct strbuf buf = STRBUF_INIT;
 	int i, ret = 0;
@@ -295,7 +295,7 @@ int sequencer_remove_state(struct replay_opts *opts)
 			char *eol = strchr(p, '\n');
 			if (eol)
 				*eol = '\0';
-			if (delete_ref("(rebase) cleanup", p, NULL, 0) < 0) {
+			if (delete_ref(r, "(rebase) cleanup", p, NULL, 0) < 0) {
 				warning(_("could not delete '%s'"), p);
 				ret = -1;
 			}
@@ -1505,9 +1505,9 @@ out:
 	return res;
 }
 
-static int write_rebase_head(struct object_id *oid)
+static int write_rebase_head(struct repository *r, struct object_id *oid)
 {
-	if (update_ref("rebase", "REBASE_HEAD", oid,
+	if (update_ref(r, "rebase", "REBASE_HEAD", oid,
 		       NULL, REF_NO_DEREF, UPDATE_REFS_MSG_ON_ERR))
 		return error(_("could not update %s"), "REBASE_HEAD");
 
@@ -1544,7 +1544,7 @@ static int do_commit(struct repository *r,
 	}
 	if (res == 1) {
 		if (is_rebase_i(opts) && oid)
-			if (write_rebase_head(oid))
+			if (write_rebase_head(r, oid))
 			    return -1;
 		return run_git_commit(r, msg_file, opts, flags);
 	}
@@ -2018,11 +2018,11 @@ static int do_pick_commit(struct repository *r,
 	if ((command == TODO_PICK || command == TODO_REWORD ||
 	     command == TODO_EDIT) && !opts->no_commit &&
 	    (res == 0 || res == 1) &&
-	    update_ref(NULL, "CHERRY_PICK_HEAD", &commit->object.oid, NULL,
+	    update_ref(r, NULL, "CHERRY_PICK_HEAD", &commit->object.oid, NULL,
 		       REF_NO_DEREF, UPDATE_REFS_MSG_ON_ERR))
 		res = -1;
 	if (command == TODO_REVERT && ((opts->no_commit && res == 0) || res == 1) &&
-	    update_ref(NULL, "REVERT_HEAD", &commit->object.oid, NULL,
+	    update_ref(r, NULL, "REVERT_HEAD", &commit->object.oid, NULL,
 		       REF_NO_DEREF, UPDATE_REFS_MSG_ON_ERR))
 		res = -1;
 
@@ -2404,7 +2404,7 @@ void sequencer_post_commit_cleanup(struct repository *r, int verbose)
 	if (!have_finished_the_last_pick())
 		return;
 
-	sequencer_remove_state(&opts);
+	sequencer_remove_state(r, &opts);
 }
 
 static void todo_list_write_total_nr(struct todo_list *todo_list)
@@ -2926,7 +2926,7 @@ int sequencer_rollback(struct repository *r, struct replay_opts *opts)
 	if (reset_merge(&oid))
 		goto fail;
 	strbuf_release(&buf);
-	return sequencer_remove_state(opts);
+	return sequencer_remove_state(r, opts);
 fail:
 	strbuf_release(&buf);
 	return -1;
@@ -3111,7 +3111,7 @@ static int make_patch(struct repository *r,
 	p = short_commit_name(commit);
 	if (write_message(p, strlen(p), rebase_path_stopped_sha(), 1) < 0)
 		return -1;
-	res |= write_rebase_head(&commit->object.oid);
+	res |= write_rebase_head(r, &commit->object.oid);
 
 	strbuf_addf(&buf, "%s/patch", get_dir(opts));
 	memset(&log_tree_opt, 0, sizeof(log_tree_opt));
@@ -3430,8 +3430,8 @@ static int do_reset(struct repository *r,
 	free((void *)desc.buffer);
 
 	if (!ret)
-		ret = update_ref(reflog_message(opts, "reset", "'%.*s'",
-						len, name), "HEAD", &oid,
+		ret = update_ref(r, reflog_message(opts, "reset", "'%.*s'",
+						   len, name), "HEAD", &oid,
 				 NULL, 0, UPDATE_REFS_MSG_ON_ERR);
 
 	strbuf_release(&ref_name);
@@ -3959,11 +3959,12 @@ static int checkout_onto(struct repository *r, struct replay_opts *opts,
 
 	if (run_git_checkout(r, opts, oid_to_hex(onto), action)) {
 		apply_autostash(rebase_path_autostash());
-		sequencer_remove_state(opts);
+		sequencer_remove_state(r, opts);
 		return error(_("could not detach HEAD"));
 	}
 
-	return update_ref(NULL, "ORIG_HEAD", &oid, NULL, 0, UPDATE_REFS_MSG_ON_ERR);
+	return update_ref(r, NULL, "ORIG_HEAD", &oid, NULL, 0,
+			  UPDATE_REFS_MSG_ON_ERR);
 }
 
 static int stopped_at_head(struct repository *r)
@@ -4041,7 +4042,7 @@ static int pick_commits(struct repository *r,
 			unlink(rebase_path_stopped_sha());
 			unlink(rebase_path_amend());
 			unlink(git_path_merge_head(r));
-			delete_ref(NULL, "REBASE_HEAD", NULL, REF_NO_DEREF);
+			delete_ref(r, NULL, "REBASE_HEAD", NULL, REF_NO_DEREF);
 
 			if (item->command == TODO_BREAK) {
 				if (!opts->verbose)
@@ -4216,7 +4217,7 @@ cleanup_head_ref:
 			}
 			msg = reflog_message(opts, "finish", "%s onto %s",
 				head_ref.buf, buf.buf);
-			if (update_ref(msg, head_ref.buf, &head, &orig,
+			if (update_ref(r, msg, head_ref.buf, &head, &orig,
 				       REF_NO_DEREF, UPDATE_REFS_MSG_ON_ERR)) {
 				res = error(_("could not update %s"),
 					head_ref.buf);
@@ -4297,7 +4298,7 @@ cleanup_head_ref:
 	 * Sequence of picks finished successfully; cleanup by
 	 * removing the .git/sequencer directory
 	 */
-	return sequencer_remove_state(opts);
+	return sequencer_remove_state(r, opts);
 }
 
 static int continue_single_pick(struct repository *r)
@@ -5304,7 +5305,7 @@ int complete_action(struct repository *r, struct replay_opts *opts, unsigned fla
 
 	if (count_commands(todo_list) == 0) {
 		apply_autostash(rebase_path_autostash());
-		sequencer_remove_state(opts);
+		sequencer_remove_state(r, opts);
 
 		return error(_("nothing to do"));
 	}
@@ -5315,12 +5316,12 @@ int complete_action(struct repository *r, struct replay_opts *opts, unsigned fla
 		return -1;
 	else if (res == -2) {
 		apply_autostash(rebase_path_autostash());
-		sequencer_remove_state(opts);
+		sequencer_remove_state(r, opts);
 
 		return -1;
 	} else if (res == -3) {
 		apply_autostash(rebase_path_autostash());
-		sequencer_remove_state(opts);
+		sequencer_remove_state(r, opts);
 		todo_list_release(&new_todo);
 
 		return error(_("nothing to do"));

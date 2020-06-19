@@ -1583,7 +1583,8 @@ static const char *error_buf(struct strbuf *err, const char *fmt, ...)
 	return NULL;
 }
 
-const char *branch_get_upstream(struct branch *branch, struct strbuf *err)
+const char *branch_get_upstream(struct repository *r, struct branch *branch,
+				struct strbuf *err)
 {
 	if (!branch)
 		return error_buf(err, _("HEAD does not point to a branch"));
@@ -1594,7 +1595,7 @@ const char *branch_get_upstream(struct branch *branch, struct strbuf *err)
 		 * or because it is not a real branch, and get_branch
 		 * auto-vivified it?
 		 */
-		if (!ref_exists(branch->refname))
+		if (!ref_exists(r, branch->refname))
 			return error_buf(err, _("no such branch: '%s'"),
 					 branch->name);
 		return error_buf(err,
@@ -1630,7 +1631,8 @@ static const char *tracking_for_push_dest(struct remote *remote,
  * bare `git push` while `branch` is checked out.
  * See also branch_get_push_1 below.
  */
-static const char *branch_get_push_remoteref(struct branch *branch)
+static const char *branch_get_push_remoteref(struct repository *r,
+					     struct branch *branch)
 {
 	struct remote *remote;
 
@@ -1665,7 +1667,7 @@ static const char *branch_get_push_remoteref(struct branch *branch)
 		{
 			const char *up, *cur;
 
-			up = branch_get_upstream(branch, NULL);
+			up = branch_get_upstream(r, branch, NULL);
 			cur = tracking_for_push_dest(remote, branch->refname, NULL);
 			if (up && cur && !strcmp(cur, up))
 				return branch->refname;
@@ -1682,7 +1684,8 @@ static const char *branch_get_push_remoteref(struct branch *branch)
  * would push to given a bare `git push` while `branch` is checked out.
  * See also branch_get_push_remoteref above.
  */
-static const char *branch_get_push_1(struct branch *branch, struct strbuf *err)
+static const char *branch_get_push_1(struct repository *r,
+				     struct branch *branch, struct strbuf *err)
 {
 	struct remote *remote;
 
@@ -1719,14 +1722,14 @@ static const char *branch_get_push_1(struct branch *branch, struct strbuf *err)
 		return tracking_for_push_dest(remote, branch->refname, err);
 
 	case PUSH_DEFAULT_UPSTREAM:
-		return branch_get_upstream(branch, err);
+		return branch_get_upstream(r, branch, err);
 
 	case PUSH_DEFAULT_UNSPECIFIED:
 	case PUSH_DEFAULT_SIMPLE:
 		{
 			const char *up, *cur;
 
-			up = branch_get_upstream(branch, err);
+			up = branch_get_upstream(r, branch, err);
 			if (!up)
 				return NULL;
 			cur = tracking_for_push_dest(remote, branch->refname, err);
@@ -1742,13 +1745,14 @@ static const char *branch_get_push_1(struct branch *branch, struct strbuf *err)
 	BUG("unhandled push situation");
 }
 
-const char *branch_get_push(struct branch *branch, struct strbuf *err)
+const char *branch_get_push(struct repository *r, struct branch *branch,
+			    struct strbuf *err)
 {
 	if (!branch)
 		return error_buf(err, _("HEAD does not point to a branch"));
 
 	if (!branch->push_tracking_ref)
-		branch->push_tracking_ref = branch_get_push_1(branch, err);
+		branch->push_tracking_ref = branch_get_push_1(r, branch, err);
 	return branch->push_tracking_ref;
 }
 
@@ -1761,7 +1765,8 @@ static int ignore_symref_update(const char *refname)
 	return (flag & REF_ISSYMREF);
 }
 
-const char *remote_ref_for_branch(struct branch *branch, int for_push)
+const char *remote_ref_for_branch(struct repository *r, struct branch *branch,
+				  int for_push)
 {
 	if (branch) {
 		if (!for_push) {
@@ -1769,7 +1774,7 @@ const char *remote_ref_for_branch(struct branch *branch, int for_push)
 				return branch->merge_name[0];
 			}
 		} else {
-			return branch_get_push_remoteref(branch);
+			return branch_get_push_remoteref(r, branch);
 		}
 	}
 	return NULL;
@@ -2012,15 +2017,16 @@ static int stat_branch_pair(const char *branch_name, const char *base,
  * upstream defined, or ref does not exist).  Returns 0 if the commits are
  * identical.  Returns 1 if commits are different.
  */
-int stat_tracking_info(struct branch *branch, int *num_ours, int *num_theirs,
+int stat_tracking_info(struct repository *r, struct branch *branch,
+		       int *num_ours, int *num_theirs,
 		       const char **tracking_name, int for_push,
 		       enum ahead_behind_flags abf)
 {
 	const char *base;
 
 	/* Cannot stat unless we are marked to build on top of somebody else. */
-	base = for_push ? branch_get_push(branch, NULL) :
-		branch_get_upstream(branch, NULL);
+	base = for_push ? branch_get_push(r, branch, NULL) :
+			  branch_get_upstream(r, branch, NULL);
 	if (tracking_name)
 		*tracking_name = base;
 	if (!base)
@@ -2032,15 +2038,15 @@ int stat_tracking_info(struct branch *branch, int *num_ours, int *num_theirs,
 /*
  * Return true when there is anything to report, otherwise false.
  */
-int format_tracking_info(struct branch *branch, struct strbuf *sb,
-			 enum ahead_behind_flags abf)
+int format_tracking_info(struct repository *r, struct branch *branch,
+			 struct strbuf *sb, enum ahead_behind_flags abf)
 {
 	int ours, theirs, sti;
 	const char *full_base;
 	char *base;
 	int upstream_is_gone = 0;
 
-	sti = stat_tracking_info(branch, &ours, &theirs, &full_base, 0, abf);
+	sti = stat_tracking_info(r, branch, &ours, &theirs, &full_base, 0, abf);
 	if (sti < 0) {
 		if (!full_base)
 			return 0;

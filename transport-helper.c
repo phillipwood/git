@@ -860,9 +860,10 @@ static int push_update_ref_status(struct strbuf *buf,
 	return !(status == REF_STATUS_OK);
 }
 
-static int push_update_refs_status(struct helper_data *data,
-				    struct ref *remote_refs,
-				    int flags)
+static int push_update_refs_status(struct repository *r,
+				   struct helper_data *data,
+				   struct ref *remote_refs,
+				   int flags)
 {
 	struct strbuf buf = STRBUF_INIT;
 	struct ref *ref = remote_refs;
@@ -889,7 +890,7 @@ static int push_update_refs_status(struct helper_data *data,
 		private = apply_refspecs(&data->rs, ref->name);
 		if (!private)
 			continue;
-		update_ref("update by helper", private, &ref->new_oid, NULL,
+		update_ref(r, "update by helper", private, &ref->new_oid, NULL,
 			   0, 0);
 		free(private);
 	}
@@ -923,7 +924,8 @@ static void set_common_push_options(struct transport *transport,
 	}
 }
 
-static int push_refs_with_push(struct transport *transport,
+static int push_refs_with_push(struct repository *r,
+			       struct transport *transport,
 			       struct ref *remote_refs, int flags)
 {
 	int force_all = flags & TRANSPORT_PUSH_FORCE;
@@ -1005,11 +1007,12 @@ static int push_refs_with_push(struct transport *transport,
 	strbuf_release(&buf);
 	string_list_clear(&cas_options, 0);
 
-	return push_update_refs_status(data, remote_refs, flags);
+	return push_update_refs_status(r, data, remote_refs, flags);
 }
 
-static int push_refs_with_export(struct transport *transport,
-		struct ref *remote_refs, int flags)
+static int push_refs_with_export(struct repository *r,
+				 struct transport *transport,
+				 struct ref *remote_refs, int flags)
 {
 	struct ref *ref;
 	struct child_process *helper, exporter;
@@ -1076,7 +1079,7 @@ static int push_refs_with_export(struct transport *transport,
 
 	if (finish_command(&exporter))
 		die(_("error while running fast-export"));
-	if (push_update_refs_status(data, remote_refs, flags))
+	if (push_update_refs_status(r, data, remote_refs, flags))
 		return 1;
 
 	if (data->export_marks) {
@@ -1088,14 +1091,15 @@ static int push_refs_with_export(struct transport *transport,
 	return 0;
 }
 
-static int push_refs(struct transport *transport,
-		struct ref *remote_refs, int flags)
+static int push_refs(struct repository *r, struct transport *transport,
+	       struct ref *remote_refs, int flags)
 {
 	struct helper_data *data = transport->data;
 
 	if (process_connect(transport, 1)) {
 		do_take_over(transport);
-		return transport->vtable->push_refs(transport, remote_refs, flags);
+		return transport->vtable->push_refs(r, transport, remote_refs,
+						    flags);
 	}
 
 	if (!remote_refs) {
@@ -1110,10 +1114,10 @@ static int push_refs(struct transport *transport,
 	}
 
 	if (data->push)
-		return push_refs_with_push(transport, remote_refs, flags);
+		return push_refs_with_push(r, transport, remote_refs, flags);
 
 	if (data->export)
-		return push_refs_with_export(transport, remote_refs, flags);
+		return push_refs_with_export(r, transport, remote_refs, flags);
 
 	return -1;
 }

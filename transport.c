@@ -436,9 +436,9 @@ int transport_refs_pushed(struct ref *ref)
 	return 0;
 }
 
-static void update_tracking_ref(struct remote *remote, char *refname,
-				struct object_id *new_oid, int deletion,
-				int verbose)
+static void update_tracking_ref(struct repository *r, struct remote *remote,
+				char *refname, struct object_id *new_oid,
+				int deletion, int verbose)
 {
 	struct refspec_item rs;
 
@@ -448,15 +448,16 @@ static void update_tracking_ref(struct remote *remote, char *refname,
 		if (verbose)
 			fprintf(stderr, "updating local tracking ref '%s'\n", rs.dst);
 		if (deletion)
-			delete_ref(NULL, rs.dst, NULL, 0);
+			delete_ref(r, NULL, rs.dst, NULL, 0);
 		else
-			update_ref("update by push", rs.dst, new_oid,
-				NULL, 0, 0);
+			update_ref(r, "update by push", rs.dst, new_oid,
+				   NULL, 0, 0);
 		free(rs.dst);
 	}
 }
 
-void transport_update_tracking_ref(struct remote *remote, struct ref *ref, int verbose)
+void transport_update_tracking_ref(struct repository *r,struct remote *remote,
+				   struct ref *ref, int verbose)
 {
 	char *refname;
 	struct object_id *new_oid;
@@ -467,13 +468,13 @@ void transport_update_tracking_ref(struct remote *remote, struct ref *ref, int v
 
 	options = ref->report.options;
 	if (!options)
-		update_tracking_ref(remote, ref->name, &ref->new_oid,
+		update_tracking_ref(r, remote, ref->name, &ref->new_oid,
 				    ref->deletion, verbose);
 	else
 		for (; options; options = options->next) {
 			refname = options->ref_name ? (char *)options->ref_name : ref->name;
 			new_oid = options->new_oid ? options->new_oid : &ref->new_oid;
-			update_tracking_ref(remote, refname, new_oid,
+			update_tracking_ref(r, remote, refname, new_oid,
 					    is_null_oid(new_oid), verbose);
 		}
 }
@@ -750,7 +751,8 @@ void transport_print_push_status(const char *dest, struct ref *refs,
 	free(head);
 }
 
-static int git_transport_push(struct transport *transport, struct ref *remote_refs, int flags)
+static int git_transport_push(struct repository *r, struct transport *transport,
+			      struct ref *remote_refs, int flags)
 {
 	struct git_transport_data *data = transport->data;
 	struct send_pack_args args;
@@ -1331,7 +1333,8 @@ int transport_push(struct repository *r,
 
 		if (!(flags & TRANSPORT_RECURSE_SUBMODULES_ONLY)) {
 			trace2_region_enter("transport_push", "push_refs", r);
-			push_ret = transport->vtable->push_refs(transport, remote_refs, flags);
+			push_ret = transport->vtable->push_refs(
+				r, transport, remote_refs, flags);
 			trace2_region_leave("transport_push", "push_refs", r);
 		} else
 			push_ret = 0;
@@ -1350,7 +1353,7 @@ int transport_push(struct repository *r,
 			       TRANSPORT_RECURSE_SUBMODULES_ONLY))) {
 			struct ref *ref;
 			for (ref = remote_refs; ref; ref = ref->next)
-				transport_update_tracking_ref(transport->remote, ref, verbose);
+				transport_update_tracking_ref(r, transport->remote, ref, verbose);
 		}
 
 		if (porcelain && !push_ret)
