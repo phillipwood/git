@@ -15,6 +15,7 @@
 #include "log-tree.h"
 #include "diffcore.h"
 #include "exec-cmd.h"
+#include "quote.h"
 
 #define INCLUDE_ALL_FILES 2
 
@@ -991,6 +992,710 @@ done:
 	return ret;
 }
 
+static int get_uncommitted_changes(struct strbuf *out)
+{
+	struct child_process cp = CHILD_PROCESS_INIT;
+
+	cp.git_cmd = 1;
+	argv_array_pushl(&cp.args, "diff-index", "-p", "-U0",
+			 "--inter-hunk-context=0", "-O/dev/null", "--no-prefix",
+			 "HEAD", "--", NULL);
+
+	return pipe_command(&cp, NULL, 0, out, 0, NULL, 0);
+}
+
+enum diff_parser_state {
+	DIFF_STATE_DIFF_HEADER,
+	DIFF_STATE_HUNK_HEADER,
+	DIFF_STATE_IN_HUNK,
+	DIFF_STATE_EOF
+};
+
+struct diff_parser {
+	struct strbuf old_path, new_path;
+	const char *old_mode, *new_mode;
+	size_t old_mode_len, new_mode_len;
+	const char *s;
+	size_t len, rem;
+	size_t del_pos, add_pos;
+	unsigned long del_off, add_off, del_len, add_len;
+	ssize_t skip_delta;
+	enum diff_parser_state state;
+};
+
+struct patch_line {
+	const char *text;
+	size_t len;
+	char sign;
+};
+
+struct patch_hunk {
+	unsigned long del_off, del_len, add_off, add_len;
+	ssize_t delta;
+	size_t line_alloc, line_nr;
+	struct patch_line *line;
+};
+
+struct patch_file {
+	char *old_path, *new_path, *old_mode, *new_mode;
+	size_t hunk_alloc, hunk_nr;
+	struct patch_hunk *hunk;
+};
+
+struct patch {
+	size_t file_alloc, file_nr;
+	struct patch_file *file;
+	unsigned push_incomplete;
+};
+
+#define PATCH_INIT { 0 }
+
+static void patch_release(struct patch *patch)
+{
+	size_t i, j;
+
+	for (i = 0; i < patch->file_nr; i++) {
+		struct patch_file *file = &patch->file[i];
+
+		for (j = 0; j < file->hunk_nr; j++)
+			free(file->hunk[j].line);
+
+		free(file->hunk);
+		free(file->old_path);
+		free(file->new_path);
+		free(file->old_mode);
+		free(file->new_mode);
+	}
+	free(patch->file);
+}
+
+static int render_patch_hunk_range(unsigned long off, unsigned long len,
+				   FILE *out)
+{
+	if (!len)
+		off--;
+	fprintf(out, "%lu", off);
+	if (len != 1)
+		fprintf(out, ",%lu", len);
+	return 0;
+}
+
+static int render_patch_hunk(struct patch_hunk *hunk, FILE *out)
+{
+	size_t i;
+
+	fputs("@@ -", out);
+	render_patch_hunk_range(hunk->del_off - hunk->delta, hunk->del_len,
+				out);
+	fputs(" +", out);
+	render_patch_hunk_range(hunk->add_off, hunk->add_len, out);
+	fputs(" @@\n", out);
+	for (i = 0; i < hunk->line_nr; i++)
+		fprintf(out, "%c%.*s", hunk->line[i].sign,
+			(int)hunk->line[i].len, hunk->line[i].text);
+	return 0;
+}
+
+static int render_patch_file(struct patch_file *file, FILE *out)
+{
+	size_t i;
+	struct strbuf path_a = STRBUF_INIT;
+	struct strbuf path_b = STRBUF_INIT;
+	if (strcmp(file->old_path, "/dev/null"))
+		quote_two_c_style(&path_a, "a/", file->old_path, 1);
+	else
+		quote_two_c_style(&path_a, "a/", file->new_path, 1);
+	if (strcmp(file->new_path, "/dev/null"))
+		quote_two_c_style(&path_b, "b/", file->new_path, 1);
+	else
+		quote_two_c_style(&path_b, "b/", file->old_path, 1);
+	fprintf(out, "diff --git %s %s\n", path_a.buf, path_b.buf);
+	if (file->old_mode) {
+		if (file->new_mode) {
+			fprintf(out, "old mode %s\n", file->old_mode);
+			fprintf(out, "new mode %s\n", file->new_mode);
+		} else {
+			fprintf(out, "deleted file mode %s\n", file->old_mode);
+		}
+	}
+	fprintf(out, "--- %s\n",
+		strcmp(file->old_path, "/dev/null") ? path_a.buf : "/dev/null");
+	fprintf(out, "+++ %s\n",
+		strcmp(file->new_path, "/dev/null") ? path_b.buf : "/dev/null");
+
+	for (i = 0; i < file->hunk_nr; i++)
+		render_patch_hunk(&file->hunk[i], out);
+
+	return 0;
+}
+
+static int render_patch(struct patch *patch, FILE *out)
+{
+	size_t i;
+
+	for (i = 0; i < patch->file_nr; i++)
+		render_patch_file(&patch->file[i], out);
+
+	return 0;
+}
+
+static void patch_push_file(struct patch *patch, struct diff_parser *parser)
+{
+	struct patch_file *file;
+
+	ALLOC_GROW_BY(patch->file, patch->file_nr, 1, patch->file_alloc);
+	file = &patch->file[patch->file_nr - 1];
+	file->old_path = strbuf_detach(&parser->old_path, NULL);
+	file->new_path = strbuf_detach(&parser->new_path, NULL);
+	if (parser->old_mode)
+		file->old_mode =
+			xmemdupz(parser->old_mode, parser->old_mode_len);
+	if (parser->new_mode)
+		file->new_mode =
+			xmemdupz(parser->new_mode, parser->new_mode_len);
+}
+
+static void patch_push_hunk(struct patch *patch, struct diff_parser *parser)
+{
+	struct patch_file *file = &patch->file[patch->file_nr - 1];
+	struct patch_hunk *hunk;
+
+	ALLOC_GROW_BY(file->hunk, file->hunk_nr, 1, file->hunk_alloc);
+	hunk = &file->hunk[file->hunk_nr - 1];
+	hunk->del_off = parser->del_off;
+	hunk->add_off = parser->add_off;
+	hunk->delta = parser->skip_delta + (ssize_t)parser->del_len -
+		      (ssize_t)parser->add_len;
+}
+
+static void patch_push_line(struct patch *patch, char sign, const char *text,
+			    size_t len)
+{
+	struct patch_file *file = &patch->file[patch->file_nr - 1];
+	struct patch_hunk *hunk = &file->hunk[file->hunk_nr - 1];
+	struct patch_line *line;
+
+	ALLOC_GROW_BY(hunk->line, hunk->line_nr, 1, hunk->line_alloc);
+	line = &hunk->line[hunk->line_nr - 1];
+	line->sign = sign;
+	line->text = text;
+	line->len = len;
+	if (sign == '+') {
+		hunk->add_len++;
+	} else if (sign == '-') {
+		hunk->del_len++;
+	} else if (sign == ' ') {
+		hunk->del_len++;
+		hunk->add_len++;
+	}
+}
+
+struct merge_line {
+	const char *text;
+	size_t len;
+};
+
+static void patch_push_stashed_line(struct patch *patch,
+				    struct merge_line *line)
+{
+	const char *text = line->text;
+
+	if (text[0] == '+' || text[0] == '-' || text[0] == '\\')
+		patch_push_line(patch, text[0], text + 1, line->len - 1);
+	else
+		BUG("bad line '%.*s'", (int)line->len, text);
+}
+
+static void patch_push_unstashed_line(struct patch *patch,
+				      struct merge_line *line)
+{
+	const char *text = line->text;
+
+	if (text[0] == '-') {
+		patch->push_incomplete = 0;
+	} else if (text[0] == '+') {
+		patch_push_line(patch, ' ', text + 1, line->len - 1);
+		patch->push_incomplete = 1;
+	} else if (text[0] != '\\') {
+		BUG("bad line '%.*s'", (int)line->len, text);
+	} else if (patch->push_incomplete) {
+		patch_push_line(patch, text[0], text + 1, line->len - 1);
+		patch->push_incomplete = 0;
+	}
+}
+
+static void diff_parser_release(struct diff_parser *parser)
+{
+	strbuf_release(&parser->old_path);
+	strbuf_release(&parser->new_path);
+}
+
+static int diff_parser_advance_internal(const char **s, size_t *rem,
+					size_t *len)
+{
+	const char *eol;
+
+	*s += *len;
+	*rem -= *len;
+	if (!*rem)
+		return 0;
+	eol = memchr(*s, '\n', *rem);
+	if (!eol)
+		BUG("diff did not end with new line '%s'", *s);
+	*len = eol - *s + 1;
+
+	return 1;
+}
+
+static void diff_parser_parse_path(const char *path, size_t len,
+				   struct strbuf *out)
+{
+	const char *end;
+
+	if (path[0] == '"') {
+		if (unquote_c_style(out, path, &end) || end - path != len)
+			BUG("unable to unquote path '%.*s'", (int)len, path);
+	} else {
+		strbuf_add(out, path, len);
+	}
+}
+
+static void diff_parser_parse_diff_header(struct diff_parser *p)
+{
+	const char *s = p->s, *path;
+	size_t len = p->len;
+	size_t rem = p->rem;
+
+	strbuf_reset(&p->old_path);
+	strbuf_reset(&p->new_path);
+	p->old_mode = p->new_mode = NULL;
+	p->old_mode_len = p->new_mode_len = 0;
+	p->skip_delta = 0;
+	p->del_pos = 0;
+
+	while (diff_parser_advance_internal(&s, &rem, &len) &&
+	       !starts_with(s, "@@ ") && !starts_with(s, "diff ")) {
+		p->len += len;
+		if (skip_prefix(s, "--- ", &path))
+			diff_parser_parse_path(path, len - (path - s) - 1,
+					       &p->old_path);
+		else if (skip_prefix(s, "+++ ", &path))
+			diff_parser_parse_path(path, len - (path - s) - 1,
+					       &p->new_path);
+		else if (skip_prefix(s, "old mode ", &p->old_mode))
+			p->old_mode_len = len - (p->old_mode - s) - 1;
+		else if (skip_prefix(s, "new mode ", &p->new_mode))
+			p->new_mode_len = len - (p->new_mode - s) - 1;
+		else if (skip_prefix(s, "deleted file mode ", &p->old_mode))
+			p->old_mode_len = len - (p->old_mode - s) - 1;
+	}
+
+	if (!p->old_path.len || !p->new_path.len)
+		BUG("unexpected end of diff");
+	if (p->new_mode && !p->old_mode)
+		BUG("new mode without old mode");
+	if (p->old_mode && !p->new_mode && strcmp(p->new_path.buf, "/dev/null"))
+		BUG("old mode without new mode");
+
+	p->state = DIFF_STATE_DIFF_HEADER;
+}
+
+static int parse_range(const char **p, unsigned long *offset,
+		       unsigned long *count)
+{
+	char *pend;
+
+	*offset = strtoul(*p, &pend, 10);
+	if (pend == *p)
+		return -1;
+	if (*pend != ',') {
+		*count = 1;
+		*p = pend;
+		return 0;
+	}
+	*count = strtoul(pend + 1, (char **)p, 10);
+	return *p == pend + 1 ? -1 : 0;
+}
+
+static void diff_parser_parse_hunk_header(struct diff_parser *p)
+{
+	const char *s = p->s;
+
+	if (!skip_prefix(s, "@@ -", &s) ||
+	    parse_range(&s, &p->del_off, &p->del_len) < 0 ||
+	    !skip_prefix(s, " +", &s) ||
+	    parse_range(&s, &p->add_off, &p->add_len) < 0 ||
+	    !skip_prefix(s, " @@", &s))
+		BUG("could not parse hunk header '%.*s'", (int)p->len, p->s);
+	if (!p->del_len)
+		p->del_off++;
+	if (!p->add_len)
+		p->add_off++;
+
+	p->del_pos = p->del_off;
+	p->state = DIFF_STATE_HUNK_HEADER;
+}
+
+static enum diff_parser_state diff_parser_advance(struct diff_parser *p)
+{
+	if (!diff_parser_advance_internal(&p->s, &p->rem, &p->len)) {
+		p->state = DIFF_STATE_EOF;
+	} else if (starts_with(p->s, "diff ")) {
+		diff_parser_parse_diff_header(p);
+	} else if (starts_with(p->s, "@@ ")) {
+		diff_parser_parse_hunk_header(p);
+	} else {
+		switch (p->s[0]) {
+		case '-':
+			p->del_pos++;
+			/* fallthrough */
+		case '+':
+		case '\\':
+			p->state = DIFF_STATE_IN_HUNK;
+			break;
+		default:
+			BUG("invalid diff line '%.*s'", (int)p->len, p->s);
+		}
+	}
+	return p->state;
+}
+
+#define diff_parser_assert_state(parser, expected_state) \
+	if ((parser)->state != (expected_state))         \
+		BUG("unexpected parser state");
+
+
+static void diff_parser_skip_hunk(struct diff_parser *parser)
+{
+	diff_parser_assert_state(parser, DIFF_STATE_HUNK_HEADER);
+	parser->skip_delta +=
+		(ssize_t)parser->del_len - (ssize_t)parser->add_len;
+	do {
+		diff_parser_advance(parser);
+	} while (parser->state == DIFF_STATE_IN_HUNK);
+}
+
+static void diff_parser_skip_file(struct diff_parser *parser)
+{
+	diff_parser_assert_state(parser, DIFF_STATE_DIFF_HEADER);
+	do {
+		diff_parser_advance(parser);
+	} while (parser->state != DIFF_STATE_DIFF_HEADER &&
+		 parser->state != DIFF_STATE_EOF);
+}
+
+static void diff_parser_init(struct diff_parser *p, struct strbuf *buf)
+{
+	memset(p, 0, sizeof(*p));
+	p->s = buf->buf;
+	p->rem = buf->len;
+	strbuf_init(&p->old_path, 0);
+	strbuf_init(&p->new_path, 0);
+	diff_parser_advance(p);
+}
+
+struct merge_line_array {
+	struct merge_line *line;
+	size_t alloc, nr, i;
+};
+
+struct merge_hunk {
+	struct merge_line_array add, del;
+	unsigned long del_off, del_len, add_off, add_len;
+};
+
+struct merge_hunk_array {
+	struct merge_hunk *hunk;
+	size_t alloc, nr;
+};
+
+static void merge_hunk_array_release(struct merge_hunk_array *hunks)
+{
+	size_t i;
+
+	for (i = 0; i < hunks->nr; i++) {
+		struct merge_hunk *hunk = &hunks->hunk[i];
+
+		free(hunk->add.line);
+		free(hunk->del.line);
+	}
+
+	free(hunks->hunk);
+}
+
+static void merge_line_array_init(struct merge_line_array *lines,
+				  unsigned long len)
+{
+	size_t alloc = len + 1;
+	ALLOC_ARRAY(lines->line, alloc);
+	lines->alloc = alloc;
+	lines->nr = lines->i = 0;
+}
+
+static struct merge_hunk *merge_hunk_push(struct merge_hunk_array *hunks,
+					  struct diff_parser *parser)
+{
+	struct merge_hunk *hunk;
+	struct merge_line_array *side, *last = NULL;
+
+	ALLOC_GROW(hunks->hunk, hunks->nr + 1, hunks->alloc);
+	hunk = &hunks->hunk[hunks->nr++];
+
+	hunk->del_off = parser->del_off;
+	hunk->del_len = parser->del_len;
+	hunk->add_off = parser->add_off;
+	hunk->add_len = parser->add_len;
+	merge_line_array_init(&hunk->add, hunk->add_len);
+	merge_line_array_init(&hunk->del, hunk->del_len);
+
+	diff_parser_assert_state(parser, DIFF_STATE_HUNK_HEADER);
+	while (diff_parser_advance(parser) == DIFF_STATE_IN_HUNK) {
+		if (parser->s[0] == '+') {
+			last = side = &hunk->add;
+		} else if (parser->s[0] == '-') {
+			last = side = &hunk->del;
+		} else if (parser->s[0] == '\\') {
+			if (!last)
+				BUG("first line of hunk starts with '\'");
+			side = last;
+			last = NULL;
+		} else {
+			BUG("bad hunk line '%.*s'", (int)parser->len,
+			    parser->s);
+		}
+		if (side->nr == side->alloc)
+			BUG("bad hunk header");
+		side->line[side->nr].text = parser->s;
+		side->line[side->nr++].len = parser->len;
+	}
+	if (hunk->add_len > 0 && hunk->add.nr < hunk->add_len - 1)
+		BUG("bad hunk: too few additions");
+	if (hunk->del.nr > 0 && hunk->del.nr < hunk->del_len - 1)
+		BUG("bad hunk: too few deletions");
+
+	return hunk;
+}
+
+static int merge_hunk_pair(struct merge_hunk *s, struct merge_hunk *u,
+			   struct patch *patch)
+{
+	while (s->del_off + s->del.i < u->del_off + u->del.i) {
+		/*
+		 * When the hunk was edited a context line was converted to a
+		 * deletion - ignore as reversing it would give us back the
+		 * context line that we already have.
+		 */
+		s->del.i++;
+	}
+	while (u->del_off + u->del.i < s->del_off + s->del.i) {
+		/* Unstashed deletion */
+		patch_push_unstashed_line(patch, &u->del.line[u->del.i++]);
+	}
+	if (u->del_off + u->del.i == s->del_off + s->del.i) {
+		for (; s->del.i < s->del.nr && u->del.i < u->del.nr;
+		     s->del.i++, u->del.i++) {
+			struct merge_line *sl = &s->del.line[s->del.i];
+			struct merge_line *ul = &u->del.line[u->del.i];
+
+			if (sl->len == ul->len &&
+			    !memcmp(sl->text, ul->text, sl->len))
+				patch_push_stashed_line(patch, sl);
+			else
+				BUG("preimages do not match\n  %.*s  %.*s",
+				    (int)sl->len, sl->text, (int)ul->len,
+				    ul->text);
+		}
+		while (s->add.i < s->add.nr && u->add.i < u->add.nr) {
+			struct merge_line *sl = &s->add.line[s->add.i];
+			struct merge_line *ul = &u->add.line[u->add.i];
+
+			if (sl->len == ul->len &&
+			    !memcmp(sl->text, ul->text, sl->len)) {
+				patch_push_stashed_line(patch, sl);
+				s->add.i++;
+				u->add.i++;
+			} else {
+				patch_push_unstashed_line(patch, ul);
+				u->add.i++;
+			}
+		}
+	}
+	/* Check that all the stashed lines matched the working tree */
+	if (s->del.i == s->del.nr && s->add.i < s->add.nr)
+		return error(_("stashed line\n%.*sdoes not match working tree"),
+			     (int)s->add.line[s->add.i].len,
+			     s->add.line[s->add.i].text);
+	/* If we've used up all the deletions in the working tree hunk
+	 * then push any remaining additions. However if the last
+	 * stashed hunk contained only deletions then it is not clear
+	 * where the insertions from the stashed deletions should come
+	 * in relation to the context lines from the insertions in the
+	 * worktree.
+	 */
+	if (u->del.i == u->del.nr) {
+		if (!s->add.nr)
+			return error(_("ambiguous"));
+		else
+			for (; u->add.i < u->add.nr; u->add.i++)
+				patch_push_unstashed_line(patch,
+							  &u->add.line[u->add.i]);
+	}
+	if ((u->del.i < u->del.nr || u->add.i < u->add.nr) &&
+	    (s->del.i < s->del.nr || s->add.i < s->add.nr))
+		BUG("neither hunk has been exhausted");
+
+	return 0;
+}
+
+static int merge_overlapping_hunks(struct diff_parser *s, struct diff_parser *u,
+				   struct patch *patch)
+{
+	struct merge_hunk_array hss = { 0 }, hus = { 0 };
+	struct merge_hunk *hs, *hu;
+	int res = 0;
+
+	patch_push_hunk(patch, u);
+	hs = merge_hunk_push(&hss, s);
+	hu = merge_hunk_push(&hus, u);
+	while (1) {
+		if (merge_hunk_pair(hs, hu, patch)) {
+			res = -1;
+			goto out;
+		}
+		if (u->state != DIFF_STATE_HUNK_HEADER ||
+		    s->state != DIFF_STATE_HUNK_HEADER ||
+		    s->del_off > u->del_off + u->del_len)
+			break;
+
+		if (hs->del.i == hs->del.nr && hs->add.i == hs->add.nr)
+			hs = merge_hunk_push(&hss, s);
+		if (hu->del.i == hu->del.nr && hu->add.i == hu->add.nr)
+			hu = merge_hunk_push(&hus, u);
+	}
+
+	/* Check that all the stashed lines matched the working tree */
+	if (hs->add.i < hs->add.nr) {
+		error(_("stashed line\n%.*sdoes not match working tree"),
+		      (int)hs->add.line[hs->add.i].len,
+		      hs->add.line[hs->add.i].text);
+		goto out;
+	}
+	/*
+	 * If the stashed hunk contains only deletions and there are
+	 * additions in the worktree that we have not processed yet
+	 * then it is not clear where the insertions from the stashed
+	 * deletions should come in relation to the context lines from
+	 * the insertions in the worktree. We only check the last hunk
+	 * as the backwards loop will pick up any other ambiguities.
+	 */
+	if (!hs->add.nr && hu->add.i < hu->add.nr) {
+		error(_("don't know how to revert stashed deletions"));
+		goto out;
+	}
+	/*
+	 * We don't really need to push these unstashed lines but it
+	 * makes checking that the patch is the same when we loop
+	 * backwards over the hunks easier
+	 */
+	 for (; hu->add.i < hu->add.nr; hu->add.i++)
+		 patch_push_unstashed_line(patch, &hu->add.line[hu->add.i]);
+
+	 /* TODO check we get the same patch when we iterate backwards
+	  * over hss and hus
+	  */
+out:
+	merge_hunk_array_release(&hss);
+	merge_hunk_array_release(&hus);
+
+	return res;
+}
+
+static int merge_file(struct diff_parser *s, struct diff_parser *u,
+		      struct patch *patch)
+{
+	patch_push_file(patch, u);
+	diff_parser_advance(u);
+	diff_parser_advance(s);
+	while (u->state == DIFF_STATE_HUNK_HEADER &&
+	       s->state == DIFF_STATE_HUNK_HEADER) {
+		if (s->del_off + s->del_len < u->del_off) {
+			warning("stashed changes, but no changes in working tree");
+			diff_parser_skip_hunk(s);
+		} else if (s->del_off > u->del_off + u->del_len) {
+			/* unstashed hunk */
+			diff_parser_skip_hunk(u);
+		} else if (merge_overlapping_hunks(s, u, patch)) {
+			return -1;
+		}
+	}
+	while (u->state == DIFF_STATE_HUNK_HEADER)
+		diff_parser_skip_hunk(u);
+	if (s->state == DIFF_STATE_HUNK_HEADER)
+		warning("stashed changes, but no changes in working tree");
+	while (s->state == DIFF_STATE_HUNK_HEADER)
+		diff_parser_skip_hunk(s);
+
+	return 0;
+}
+
+static int stash_patch_remove(struct strbuf *stashed_changes)
+{
+	struct child_process cp = CHILD_PROCESS_INIT;
+	struct strbuf uncommitted_changes = STRBUF_INIT;
+	struct diff_parser s;
+	struct diff_parser u;
+	struct patch patch = PATCH_INIT;
+	int cmp, res = 0;
+	FILE *out;
+
+	diff_parser_init(&s, stashed_changes);
+	if (get_uncommitted_changes(&uncommitted_changes))
+		return error(_("cannot get uncommitted changes"));
+	diff_parser_init(&u, &uncommitted_changes);
+
+	diff_parser_assert_state(&s, DIFF_STATE_DIFF_HEADER);
+	diff_parser_assert_state(&u, DIFF_STATE_DIFF_HEADER);
+
+	do {
+		cmp = strcmp(s.old_path.buf, "/dev/null") ?
+			      strcmp(s.old_path.buf, u.old_path.buf) :
+			      strcmp(s.new_path.buf, u.new_path.buf);
+		if (cmp < 0) {
+			warning("stashed changes in '%s' but not in working tree",
+				s.old_path.buf);
+			diff_parser_skip_file(&s);
+		} else if (cmp) {
+			diff_parser_skip_file(&u);
+		} else if (merge_file(&s, &u, &patch)) {
+			res = -1;
+			goto out;
+		}
+	} while (s.state == DIFF_STATE_DIFF_HEADER &&
+		 u.state == DIFF_STATE_DIFF_HEADER);
+
+	if (s.state != DIFF_STATE_EOF && u.state != DIFF_STATE_EOF)
+		BUG("neither diff has been exhausted");
+
+	cp.in = -1;
+	cp.git_cmd = 1;
+	argv_array_pushl(&cp.args, "apply", "-R", "--unidiff-zero", NULL);
+	if (start_command(&cp))
+		die_errno("apply failed to start");
+	out = xfdopen(cp.in, "w");
+	render_patch(&patch, out);
+	if (fflush(out) | fclose(out))
+		die_errno("cannot write to git apply");
+	if (finish_command(&cp))
+		die_errno("apply failed");
+out:
+	patch_release(&patch);
+	diff_parser_release(&s);
+	diff_parser_release(&u);
+	strbuf_release(&uncommitted_changes);
+
+	return res;
+}
+
 static int stash_patch(struct stash_info *info, const struct pathspec *ps,
 		       struct strbuf *out_patch, int quiet)
 {
@@ -1034,8 +1739,10 @@ static int stash_patch(struct stash_info *info, const struct pathspec *ps,
 	}
 
 	cp_diff_tree.git_cmd = 1;
-	argv_array_pushl(&cp_diff_tree.args, "diff-tree", "-p", "-U1", "HEAD",
-			 oid_to_hex(&info->w_tree), "--", NULL);
+	argv_array_pushl(&cp_diff_tree.args, "diff-tree", "-p", "-U0",
+			 "--inter-hunk-context=0", "-O/dev/null",
+			 "--no-prefix", "HEAD", oid_to_hex(&info->w_tree), "--",
+			 NULL);
 	if (pipe_command(&cp_diff_tree, NULL, 0, out_patch, 0, NULL, 0)) {
 		ret = -1;
 		goto done;
@@ -1417,12 +2124,7 @@ static int do_push_stash(const struct pathspec *ps, const char *stash_msg, int q
 		}
 		goto done;
 	} else {
-		struct child_process cp = CHILD_PROCESS_INIT;
-
-		cp.git_cmd = 1;
-		argv_array_pushl(&cp.args, "apply", "-R", NULL);
-
-		if (pipe_command(&cp, patch.buf, patch.len, NULL, 0, NULL, 0)) {
+		if (stash_patch_remove(&patch)) {
 			if (!quiet)
 				fprintf_ln(stderr, _("Cannot remove "
 						     "worktree changes"));
@@ -1446,6 +2148,7 @@ static int do_push_stash(const struct pathspec *ps, const char *stash_msg, int q
 
 done:
 	strbuf_release(&stash_msg_buf);
+	strbuf_release(&patch);
 	return ret;
 }
 

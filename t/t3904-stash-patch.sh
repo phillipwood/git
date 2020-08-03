@@ -112,4 +112,33 @@ test_expect_success 'stash -p with split hunk' '
 	! grep "added line 2" test
 '
 
+test_expect_success 'stash -p with pathological split hunk' '
+	git reset --hard &&
+	test_write_lines c c c >test &&
+	git add test &&
+	git commit -m "initial" &&
+	test_when_finished "git reset --hard HEAD^" &&
+	test_write_lines c a a c a a c >test &&
+	printf "%s\n" s n y q |
+	git stash -p 2>error &&
+	test_must_be_empty error &&
+	test_write_lines c a a c c >expect &&
+	test_cmp expect test
+'
+
+test_expect_success 'stash -p with edited hunk' '
+	git reset --hard &&
+	test_write_lines c c >test &&
+	git add test &&
+	git commit -m "initial" &&
+	test_when_finished "git reset --hard HEAD^" &&
+	test_write_lines c a b a c >test &&
+	test_write_lines " c" "+a" "+a" " c" >patch &&
+	printf "%s\n" e q |
+	GIT_EDITOR="cat patch >" git stash -p 2>error &&
+	test_must_be_empty error &&
+	test_write_lines c b c >expect &&
+	test_cmp expect test
+'
+
 test_done
