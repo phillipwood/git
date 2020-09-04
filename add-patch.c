@@ -236,6 +236,21 @@ static struct patch_mode patch_mode_worktree_nothead = {
 			"the file\n"),
 };
 
+struct line_array {
+	struct strbuf *buf;
+	struct line {
+		size_t start, len;
+	} *line;
+	size_t nr, alloc;
+};
+
+#define LINE_ARRAY_INIT(strbuf) { .buf = strbuf }
+
+static void line_array_clear(struct line_array *lines)
+{
+	free(lines->line);
+}
+
 struct hunk_header {
 	unsigned long old_offset, old_count, new_offset, new_count;
 	/*
@@ -249,10 +264,18 @@ struct hunk_header {
 
 struct hunk {
 	size_t start, end, colored_start, colored_end, splittable_into;
+	size_t orig_start, orig_end;
+	unsigned long orig_old_offset, orig_new_offset;
 	ssize_t delta;
 	enum { UNDECIDED_HUNK = 0, SKIP_HUNK, USE_HUNK } use;
 	struct hunk_header header;
+	struct line_array orig_image;
 };
+
+static void hunk_clear(struct hunk *hunk)
+{
+	line_array_clear(&hunk->orig_image);
+}
 
 struct add_p_state {
 	struct add_i_state s;
@@ -275,14 +298,17 @@ struct add_p_state {
 
 static void add_p_state_clear(struct add_p_state *s)
 {
-	size_t i;
+	size_t i, j;
 
 	strbuf_release(&s->answer);
 	strbuf_release(&s->buf);
 	strbuf_release(&s->plain);
 	strbuf_release(&s->colored);
-	for (i = 0; i < s->file_diff_nr; i++)
+	for (i = 0; i < s->file_diff_nr; i++) {
+		for (j = 0; j < s->file_diff[i].hunk_nr; j++)
+			hunk_clear(&s->file_diff[i].hunk[j]);
 		free(s->file_diff[i].hunk);
+	}
 	free(s->file_diff);
 	clear_add_i_state(&s->s);
 }
@@ -1119,6 +1145,105 @@ static void recolor_hunk(struct add_p_state *s, struct hunk *hunk)
 	hunk->colored_end = s->colored.len;
 }
 
+struct matches {
+	size_t len_seq, len_str, alloc, nr;
+	struct match {
+		size_t off_a, off_b;
+	} *match;
+};
+
+#define MATCHES_INIT { 0 }
+
+static void matches_clear(struct matches *matches)
+{
+	free(matches->match);
+}
+
+static int line_eq(const char *base_a, struct line *a,
+		   const char *base_b, struct line *b)
+{
+	const char *p = base_a + a->start;
+	const char *q = base_b + b->start;
+
+	if (p[0] != '\\' && q[0] != '\\') {
+		if (a->len == b->len)
+			return !memcmp(&p[1], &q[1], a->len - 1);
+		else
+			/*
+			 * Match empty context line with leading space removed
+			 * when editing
+			 */
+			return b->len == 1 && a->len == 2 && p[0] == ' ';
+	} else {
+		return p[0] == q[0];
+	}
+}
+
+static void push_line(struct line_array *lines, size_t start, size_t len)
+{
+	struct line l = { .start = start, .len = len };
+
+	ALLOC_GROW(lines->line, lines->nr + 1, lines->alloc);
+	lines->line[lines->nr++] = l;
+}
+
+static void lcs(struct line_array *a, struct line_array *b,
+		struct matches *matches)
+{
+	size_t *last_seq, *last_str;
+	size_t i, j, len_str, last_len_str = 0;
+	size_t len_seq = 0, last_len_seq = 0;
+
+	CALLOC_ARRAY(last_str, st_sub(b->nr, 1));
+	CALLOC_ARRAY(last_seq, b->nr);
+	for (i = 0; i < a->nr; i++) {
+		last_len_seq = 0;
+		for (j = 0; j < b->nr; j++) {
+			if (line_eq(a->buf->buf, &a->line[i],
+				    b->buf->buf, &b->line[j])) {
+				if (!i || !j) {
+					len_seq = 1;
+					len_str = 1;
+				} else {
+					len_seq = last_seq[j - 1] + 1;
+					len_str = last_str[j - 1] + 1;
+				}
+				if (len_str > matches->len_str) {
+					matches->len_str = len_str;
+					matches->nr = 0;
+				}
+				if (len_str >= matches->len_str) {
+					struct match m = {
+						.off_a = i + 1 - len_str,
+						.off_b = j + 1 - len_str,
+					};
+
+					ALLOC_GROW(matches->match,
+						   matches->nr + 1,
+						   matches->alloc);
+					matches->match[matches->nr++] = m;
+				}
+			} else if (!j || last_len_seq < last_seq[j]) {
+				len_seq = last_seq[j];
+				len_str = 0;
+			} else {
+				len_seq = last_len_seq;
+				len_str = 0;
+			}
+			if (j) {
+				last_seq[j - 1] = last_len_seq;
+				last_str[j - 1] = last_len_str;
+			}
+			last_len_seq = len_seq;
+			last_len_str = len_str;
+		}
+		last_seq[j - 1] = last_len_seq;
+	}
+	matches->len_seq = len_seq;
+	free(last_str);
+	free(last_seq);
+}
+
 enum hunk_error_id {
 	ERR_BAD_LINE,
 	ERR_DUPLICATE_HEADER,
@@ -1137,6 +1262,7 @@ struct hunk_error {
 };
 
 struct edited_hunk {
+	struct line_array image;
 	struct hunk_error *err;
 	size_t err_alloc, err_nr;
 	size_t start;
@@ -1144,7 +1270,15 @@ struct edited_hunk {
 	unsigned long old_offset, old_count, new_offset, new_count;
 };
 
-#define EDITED_HUNK_INIT { .context_only = 1 }
+#define EDITED_HUNK_INIT(state)	{			\
+		.context_only = 1,			\
+		.image = LINE_ARRAY_INIT(&state->buf),	\
+	}
+
+static void edited_hunk_clear(struct edited_hunk *edited)
+{
+	line_array_clear(&edited->image);
+}
 
 static void push_parse_error(struct edited_hunk *edited,
 			     size_t pos,
@@ -1191,6 +1325,123 @@ static void insert_hunk_errors(struct add_p_state *s,
 			strbuf_add(&s->plain, s->buf.buf + i, next - i);
 		i = next;
 	}
+}
+
+static void store_orig_hunk(struct add_p_state *s, struct hunk *hunk)
+{
+	size_t i;
+	int allow_incomplete = 0;
+
+	hunk->orig_start = hunk->start;
+	hunk->orig_end = hunk->end;
+	hunk->orig_old_offset = hunk->header.old_offset;
+	hunk->orig_new_offset = hunk->header.new_offset;
+	hunk->orig_image.buf = &s->plain;
+	for (i = hunk->start; i < hunk->end; ) {
+		size_t next = find_next_line(hunk->orig_image.buf, i);
+		char c = s->plain.buf[i];
+
+		if (c == ' ' || (s->mode->is_reverse && c == '+') ||
+		    (!s->mode->is_reverse && c == '-') ||
+		    (allow_incomplete && c == '\\')) {
+			push_line(&hunk->orig_image, i, next - i);
+			allow_incomplete = c != '\\';
+		} else {
+			allow_incomplete = 0;
+		}
+		i = next;
+	}
+}
+
+static int check_edited_hunk_header(struct matches *matches, struct hunk *hunk,
+				    struct edited_hunk *edited)
+{
+	size_t orig_old_offset = hunk->header.old_offset;
+	size_t edited_old_offset = edited->old_offset;
+	size_t orig_new_offset = hunk->header.new_offset;
+	size_t *m, nr = 0, len = matches->len_str, i;
+	int res = 0;
+
+	ALLOC_ARRAY(m, matches->nr);
+	for (i = 0; i < matches->nr; i++) {
+		size_t off_a = matches->match[i].off_a;
+		size_t off_b = matches->match[i].off_b;
+		/*
+		 * The longest common substring should be the same
+		 * length as the longest common subsequence and it
+		 * should match from the beginning of either the
+		 * original or edited hunk through to the end of
+		 * either one.
+		 */
+		if (matches->len_seq == len && (!off_a || !off_b) &&
+			  (off_a + len == hunk->orig_image.nr ||
+			  off_b + len == edited->image.nr)) {
+			/*
+			 * If the hunk header has been edited and the
+			 * old offset equals one of the possible
+			 * matches then use it. Unfortunately if the
+			 * hunk header is unchanged we cannot tell if
+			 * the user wants to use the original offset
+			 * or if they just haven't edited it. We could
+			 * look at the lengths in the header of the
+			 * edited hunk to see if the user has updated
+			 * them but they are adjusted automatically by
+			 * editors such as emacs which do not adjust
+			 * the offsets automatically if leading
+			 * context is deleted.
+			 */
+			if (edited->has_hunk_header &&
+			    orig_old_offset != edited_old_offset &&
+			    ((!off_a && off_b < orig_old_offset &&
+			      orig_old_offset - off_b == edited_old_offset) ||
+			     (!off_b &&
+			      orig_old_offset + off_a == edited_old_offset))) {
+				hunk->header.old_offset = edited->old_offset;
+				hunk->header.new_offset = edited->old_offset +
+							  orig_new_offset -
+							  orig_old_offset;
+				break;
+			}
+			m[nr++] = i;
+		}
+	}
+	if (i == matches->nr) {
+		if (nr == 1) {
+			ssize_t delta = matches->match[m[0]].off_a -
+				matches->match[m[0]].off_b;
+			if (delta > 0 || -delta < orig_old_offset) {
+				hunk->header.old_offset += delta;
+				hunk->header.new_offset += delta;
+			} else {
+				res = error(_(
+					"preimage extends beyond beginning of file"));
+			}
+		} else if (!nr) {
+			res = error(_(
+			       "edited pre-image does not match the original"));
+		} else if (!edited->context_only) {
+			/* There is more than one valid match */
+			res = error(_("unable to determine new hunk offset"));
+		}
+	}
+	free(m);
+	return res;
+}
+
+static int check_edited_image(struct add_p_state *s, struct hunk *hunk,
+			      struct edited_hunk *edited)
+{
+	struct matches matches = MATCHES_INIT;
+	int res = 0;
+
+	if (!hunk->orig_image.nr || !edited->image.nr)
+		return 0;
+
+	lcs(&hunk->orig_image, &edited->image, &matches);
+	res = check_edited_hunk_header(&matches, hunk, edited);
+	matches_clear(&matches);
+
+	return res;
 }
 
 struct incomplete_line_data {
@@ -1272,11 +1523,14 @@ static void process_incomplete(struct edited_hunk *edited,
 
 static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 {
-	struct edited_hunk edited = EDITED_HUNK_INIT;
+	struct edited_hunk edited = EDITED_HUNK_INIT(s);
 	struct incomplete_line_data incomplete = INCOMPLETE_LINE_DATA_INIT;
 	size_t i, plain_len;
-	int in_hunk = 0;
+	int in_hunk = 0, res;
 	char sign = '\0';
+
+	if (!hunk->orig_end)
+		store_orig_hunk(s, hunk);
 
 	hunk->start = plain_len = s->plain.len;
 	for (i = 0; i < s->buf.len; ) {
@@ -1285,6 +1539,8 @@ static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 
 		switch (c) {
 		case '+':
+			if (s->mode->is_reverse)
+				push_line(&edited.image, i, next - i);
 			edited.new_count++;
 			in_hunk = 1;
 			edited.context_only = 0;
@@ -1293,6 +1549,8 @@ static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 			strbuf_add(&s->plain, s->buf.buf + i, next - i);
 			break;
 		case '-':
+			if (!s->mode->is_reverse)
+				push_line(&edited.image, i, next - i);
 			edited.old_count++;
 			in_hunk = 1;
 			edited.context_only = 0;
@@ -1301,6 +1559,7 @@ static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 			strbuf_add(&s->plain, s->buf.buf + i, next - i);
 			break;
 		case ' ': case '\n': case '\r':
+			push_line(&edited.image, i, next - i);
 			edited.old_count++;
 			edited.new_count++;
 			in_hunk = 1;
@@ -1315,6 +1574,10 @@ static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 			 * space and the line to be at least 12 bytes long
 			 */
 			if (s->buf.buf[i + 1] == ' ' && next - i > 12) {
+				if (sign == ' ' ||
+				    (sign == '-' && !s->mode->is_reverse) ||
+				    (sign == '+' && s->mode->is_reverse))
+					push_line(&edited.image, i, next - i);
 				strbuf_add(&s->plain, s->buf.buf + i, next - i);
 				ALLOC_GROW(incomplete.line,
 					   incomplete.nr + 1, incomplete.alloc);
@@ -1362,29 +1625,32 @@ static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 
 	process_incomplete(&edited, &incomplete);
 	incomplete_line_data_clear(&incomplete);
-	if (edited.err_nr) {
+	if (!edited.err_nr)
+		res = check_edited_image(s, hunk, &edited);
+
+	if (edited.err_nr || res) {
 		/* reset plain buf */
 		hunk->start = s->plain.len = plain_len;
 		insert_hunk_errors(s, &edited);
 		hunk->end = s->plain.len;
+		edited_hunk_clear(&edited);
 		return -1;
 	}
 
 	hunk->end = s->plain.len;
 	if ((hunk->end == hunk->start && !edited.has_hunk_header) ||
-	    (hunk->end != hunk->start && edited.context_only))
+	    (hunk->end != hunk->start && edited.context_only)) {
 		/* The user aborted editing by deleting everything */
+		edited_hunk_clear(&edited);
 		return 0;
-
-	if (edited.has_hunk_header) {
-		hunk->header.old_offset = edited.old_offset;
-		hunk->header.new_offset = edited.new_offset;
 	}
+
 	hunk->delta += hunk->header.old_count - hunk->header.new_count -
 		       edited.old_count + edited.new_count;
 	hunk->header.old_count = edited.old_count;
 	hunk->header.new_count = edited.new_count;
 
+	edited_hunk_clear(&edited);
 	return 1;
 }
 
@@ -1488,6 +1754,7 @@ static int edit_hunk_loop(struct add_p_state *s,
 		int res = edit_hunk_manually(s, hunk);
 		if (res == 0) {
 			/* abandoned */
+			backup.orig_image = hunk->orig_image;
 			*hunk = backup;
 			return -1;
 		} else if (res > 0) {
@@ -1496,6 +1763,7 @@ static int edit_hunk_loop(struct add_p_state *s,
 			/* Drop edits (they were appended to s->plain) */
 			strbuf_setlen(&s->plain, plain_len);
 			strbuf_setlen(&s->colored, colored_len);
+			backup.orig_image = hunk->orig_image;
 			*hunk = backup;
 		}
 

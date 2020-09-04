@@ -77,12 +77,13 @@ test_expect_success 'setup' '
 	test_write_lines a b c a b c a b c >file &&
 	git add file &&
 	git commit -minitial &&
+	git tag initial &&
 	test_tick
 '
 
 cleanup() {
 	rm -f editor-state unedited-hunk-* &&
-	git read-tree -u --reset HEAD
+	git read-tree -u --reset initial
 }
 
 check_staged_contents() {
@@ -230,6 +231,145 @@ test_expect_success 'replace bad hunk header when re-editing hunk' '
 
 	check_hunk_header 2 &&
 	check_staged_contents file a y b z c a b c a b c
+'
+
+test_expect_success 'adjust hunk offset when leading context deleted' '
+	test_when_finished cleanup &&
+	test_write_lines a b c a b c d e a b c >file &&
+	# 1 - Remove the first two context lines and "+e"
+	test_write_lines e n q |
+	SED_CMD_1="-n;/^ /{;n;:loop;n;/^+e/!p;bloop;};p" \
+	git add -p &&
+
+	check_staged_contents file a b c a b c d a b c
+'
+
+test_expect_success 'adjust hunk offset when leading context deleted (reverse patch)' '
+	test_when_finished cleanup &&
+	test_write_lines a b c a b c d e a b c >file &&
+	git commit -m "add de" file &&
+	git checkout HEAD^ -- file &&
+	# 1 - Remove the first two context lines and "-e"
+	test_write_lines e n q |
+	SED_CMD_1="-n;/^ /{;n;:loop;n;/^-e/!p;bloop;};p" \
+	git reset -p HEAD -- &&
+
+	check_staged_contents file a b c a b c d a b c
+'
+
+test_expect_success 'detect bad preimage' '
+	test_when_finished cleanup &&
+	test_write_lines a b c a 0 b c a b c >file &&
+	# 1 - Change insertion into bad context
+	# 2 - Change bad context into bad deletion
+	# 3 - Change bad deletion back into insertion
+	test_write_lines e y y q |
+	SED_CMD_1="s/^+0/ 1/" \
+	SED_CMD_2="s/^ 1/-2/" \
+	SED_CMD_3="s/^-2/+3/" \
+	git add -p &&
+
+	check_staged_contents file a b c a 3 b c a b c
+'
+
+test_expect_success 'ambigous preimage' '
+	test_when_finished cleanup &&
+	test_write_lines a b c a b c 0 a b c >file &&
+	# 1 - Remove the hunk header and first three context lines
+	# 2 - Leave the original hunk header in tact
+	# 3 - Edit the hunk header incorrectly
+	# 4 - Edit the hunk header correctly
+	test_write_lines e y y y y q |
+	SED_CMD_1="-n;/^@/{;n;n;n;n};s/^+0/+1/;p" \
+	SED_CMD_2="s/^+1/+2/" \
+	SED_CMD_3="/^@/c\;@@ -5,3 +5,4 @@;s/^+2/+3/" \
+	SED_CMD_4="/^@/c\;@@ -7,5 +9,3 @@;s/^+3/+4/" \
+	git add -p &&
+
+	# Check hunk header is restored after each bad edit
+	check_hunk_header 2 &&
+	check_hunk_header 3 &&
+	check_hunk_header 4 &&
+
+	check_staged_contents file a b c a b c 4 a b c
+'
+
+test_expect_success 'too many lines added to beginning of preimage' '
+	test_when_finished cleanup &&
+	test_write_lines a b c a 0 b c a b c >file &&
+	test_write_lines e y q |
+	SED_CMD_1="/^@/a\; e\; a;s/^+0/+1/" \
+	SED_CMD_2="/^ e/d;s/^+1/+2/" \
+	git add -p &&
+
+	check_staged_contents file a b c a 2 b c a b c
+'
+
+f () {
+	test_when_finished cleanup &&
+	test_write_lines a b c a b y c a b c >file &&
+	test_write_lines e q >input &&
+	HUNK_FILE_1=hunk.txt git add -p <input &&
+	check_staged_contents file "$@"
+}
+
+test_expect_success 'lines deleted from beginning of preimage' '
+	cat >hunk.txt <<-\EOF &&
+	 a
+	 b
+	+z
+	 c
+	 a
+	 b
+	EOF
+	f a b c a b z c a b c
+'
+
+test_expect_success 'lines deleted from end of preimage' '
+	cat >hunk.txt <<-\EOF &&
+	 c
+	 a
+	 b
+	+z
+	 c
+	EOF
+	f a b c a b z c a b c
+'
+
+test_expect_success 'lines deleted from beginning and end of preimage' '
+	cat >hunk.txt <<-\EOF &&
+	 a
+	 b
+	+z
+	 c
+	EOF
+	f a b c a b z c a b c
+'
+
+test_expect_success 'lines added to beginning and deleted from end of preimage' '
+	cat >hunk.txt <<-\EOF &&
+	 b
+	 c
+	 a
+	 b
+	+z
+	 c
+	 a
+	EOF
+	f a b c a b z c a b c
+'
+
+test_expect_success 'lines deleted from beginning and added to end of preimage' '
+	cat >hunk.txt <<-\EOF &&
+	 a
+	 b
+	+z
+	 c
+	 a
+	 b
+	 c
+	EOF
+	f a b c a b z c a b c
 '
 
 test_done
