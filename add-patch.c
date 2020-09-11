@@ -1119,18 +1119,64 @@ static void recolor_hunk(struct add_p_state *s, struct hunk *hunk)
 	hunk->colored_end = s->colored.len;
 }
 
+enum hunk_error_id {
+	ERR_BAD_LINE,
+	ERR_DUPLICATE_HEADER,
+	ERR_HEADER_NOT_FIRST_LINE,
+};
+
+struct hunk_error {
+	enum hunk_error_id id;
+	size_t pos;
+};
+
 struct edited_hunk {
+	struct hunk_error *err;
+	size_t err_alloc, err_nr;
+	size_t start;
 	unsigned has_hunk_header :1;
 	unsigned long old_offset, old_count, new_offset, new_count;
 };
 
 #define EDITED_HUNK_INIT { 0 }
 
+static void push_parse_error(struct edited_hunk *edited,
+			     size_t pos,
+			     enum hunk_error_id id)
+{
+	struct hunk_error e = { .id = id, .pos = pos };
+
+	ALLOC_GROW(edited->err, edited->err_nr + 1, edited->err_alloc);
+	edited->err[edited->err_nr++] = e;
+}
+
+static void insert_hunk_errors(struct add_p_state *s,
+			       struct edited_hunk *edited)
+{
+	static const char *msg[] = {
+		N_("invalid line"),
+		N_("can only handle a single hunk"),
+		N_("hunk header must be the first line"),
+	};
+	size_t i = edited->start, j = 0;
+	while (i < s->buf.len) {
+		size_t next = find_next_line(&s->buf, i);
+
+		if (j < edited->err_nr && edited->err[j].pos == i)
+			strbuf_addf(&s->plain, _("%s error: %s\n"),
+				    comment_line_str,
+				    _(msg[edited->err[j++].id]));
+		if (!starts_with(s->buf.buf + i, comment_line_str))
+			strbuf_add(&s->plain, s->buf.buf + i, next - i);
+		i = next;
+	}
+}
+
 static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 {
 	struct edited_hunk edited = EDITED_HUNK_INIT;
 	size_t i, plain_len;
-	int in_hunk = 0, ret = 1;
+	int in_hunk = 0;
 
 	hunk->start = plain_len = s->plain.len;
 	for (i = 0; i < s->buf.len; ) {
@@ -1161,28 +1207,42 @@ static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 		case '@': {
 			unsigned long old_off, new_off;
 
-			if (!in_hunk) {
-				if (parse_hunk_header_line(s->buf.buf + i,
-							   &old_off, NULL,
-							   &new_off, NULL)) {
+			if (parse_hunk_header_line(s->buf.buf + i,
+					&old_off, NULL, &new_off, NULL)) {
+				if (edited.has_hunk_header) {
+					push_parse_error(&edited, i,
+							 ERR_DUPLICATE_HEADER);
+				} else if (in_hunk) {
+					push_parse_error(&edited, i,
+							 ERR_HEADER_NOT_FIRST_LINE);
+				} else {
 					hunk->start = s->plain.len;
 					edited.old_offset = old_off;
 					edited.new_offset = new_off;
+					edited.start = next;
 					edited.has_hunk_header = 1;
-				} else {
-					ret = error(_("could not parse hunk header"));
 				}
+			} else if (in_hunk) {
+				push_parse_error(&edited, i, ERR_BAD_LINE);
 			} else {
-				strbuf_add(&s->plain, s->buf.buf + i, next - i);
+				/* Ignore bad hunk header */
+				edited.start = next;
 			}
-			in_hunk = 1;
 			break;
 		}
 		default:
 			if (!starts_with(s->buf.buf + i, comment_line_str))
-				strbuf_add(&s->plain, s->buf.buf + i, next - i);
+				push_parse_error(&edited, i, ERR_BAD_LINE);
 		}
 		i = next;
+	}
+
+	if (edited.err_nr) {
+		/* reset plain buf */
+		hunk->start = s->plain.len = plain_len;
+		insert_hunk_errors(s, &edited);
+		hunk->end = s->plain.len;
+		return -1;
 	}
 
 	hunk->end = s->plain.len;
@@ -1199,7 +1259,7 @@ static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 	hunk->header.old_count = edited.old_count;
 	hunk->header.new_count = edited.new_count;
 
-	return ret;
+	return 1;
 }
 
 static int edit_hunk_manually(struct add_p_state *s, struct hunk *hunk)
