@@ -1119,9 +1119,31 @@ static void recolor_hunk(struct add_p_state *s, struct hunk *hunk)
 	hunk->colored_end = s->colored.len;
 }
 
-static int edit_hunk_manually(struct add_p_state *s, struct hunk *hunk)
+static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 {
 	size_t i;
+
+	/* strip out commented lines */
+	hunk->start = s->plain.len;
+	for (i = 0; i < s->buf.len; ) {
+		size_t next = find_next_line(&s->buf, i);
+
+		if (!starts_with(s->buf.buf + i, comment_line_str))
+			strbuf_add(&s->plain, s->buf.buf + i, next - i);
+		i = next;
+	}
+
+	hunk->end = s->plain.len;
+	if (hunk->end == hunk->start)
+		/* The user aborted editing by deleting everything */
+		return 0;
+
+	return 1;
+}
+
+static int edit_hunk_manually(struct add_p_state *s, struct hunk *hunk)
+{
+	int ret;
 
 	strbuf_reset(&s->buf);
 	strbuf_commented_addf(&s->buf, comment_line_str,
@@ -1153,20 +1175,9 @@ static int edit_hunk_manually(struct add_p_state *s, struct hunk *hunk)
 	if (strbuf_edit_interactively(&s->buf, "addp-hunk-edit.diff", NULL) < 0)
 		return -1;
 
-	/* strip out commented lines */
-	hunk->start = s->plain.len;
-	for (i = 0; i < s->buf.len; ) {
-		size_t next = find_next_line(&s->buf, i);
-
-		if (!starts_with(s->buf.buf + i, comment_line_str))
-			strbuf_add(&s->plain, s->buf.buf + i, next - i);
-		i = next;
-	}
-
-	hunk->end = s->plain.len;
-	if (hunk->end == hunk->start)
-		/* The user aborted editing by deleting everything */
-		return 0;
+	ret = parse_edited_hunk(s, hunk);
+	if (ret < 1)
+		return ret;
 
 	recolor_hunk(s, hunk);
 
