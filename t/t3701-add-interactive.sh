@@ -263,7 +263,7 @@ test_expect_success 'setup patch' '
 	-b
 	+f
 	$SP
-	c
+	 c
 	EOF
 '
 
