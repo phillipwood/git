@@ -1123,6 +1123,12 @@ enum hunk_error_id {
 	ERR_BAD_LINE,
 	ERR_DUPLICATE_HEADER,
 	ERR_HEADER_NOT_FIRST_LINE,
+	ERR_BAD_INCOMPLETE_LINE,
+	ERR_DUPLICATE_INCOMPLETE,
+	ERR_FIRST_LINE_IS_INCOMPLETE,
+	ERR_INCOMPLETE_CONTEXT_BEFORE_ADDITION,
+	ERR_INCOMPLETE_CONTEXT_BEFORE_DELETION,
+	ERR_INCOMPLETE_NOT_LAST,
 };
 
 struct hunk_error {
@@ -1150,6 +1156,14 @@ static void push_parse_error(struct edited_hunk *edited,
 	edited->err[edited->err_nr++] = e;
 }
 
+static int hunk_error_cmp(const void *a, const void *b)
+{
+	const struct hunk_error *e1 = a;
+	const struct hunk_error *e2 = b;
+
+	return (e2->pos < e1->pos) - (e1->pos < e2->pos);
+}
+
 static void insert_hunk_errors(struct add_p_state *s,
 			       struct edited_hunk *edited)
 {
@@ -1157,8 +1171,15 @@ static void insert_hunk_errors(struct add_p_state *s,
 		N_("invalid line"),
 		N_("can only handle a single hunk"),
 		N_("hunk header must be the first line"),
+		N_("'\\' line must start '\\ ' and be at least 12 characters"),
+		N_("duplicate '\\' line"),
+		N_("hunk cannot begin with '\\' line"),
+		N_("addition after '\\' context line"),
+		N_("deletion after '\\' context line"),
+		N_("'\\' must be last line"),
 	};
 	size_t i = edited->start, j = 0;
+	QSORT(edited->err, edited->err_nr, hunk_error_cmp);
 	while (i < s->buf.len) {
 		size_t next = find_next_line(&s->buf, i);
 
@@ -1172,11 +1193,90 @@ static void insert_hunk_errors(struct add_p_state *s,
 	}
 }
 
+struct incomplete_line_data {
+	size_t nr, alloc, last_context, last_minus, last_plus;
+	struct incomplete_line {
+		size_t start;
+		char sign;
+	} *line;
+};
+
+#define INCOMPLETE_LINE_DATA_INIT {		\
+		.last_context = SIZE_MAX,	\
+		.last_minus = SIZE_MAX,		\
+		.last_plus = SIZE_MAX,		\
+	}
+
+static void incomplete_line_data_clear(struct incomplete_line_data *i)
+{
+	FREE_AND_NULL(i->line);
+	i->alloc = 0;
+	i->nr = 0;
+}
+
+static void process_incomplete(struct edited_hunk *edited,
+			       struct incomplete_line_data *i)
+{
+	size_t j;
+	int context = 0, minus = 0, plus = 0;
+
+	for (j = 0; j < i->nr; i++) {
+		struct incomplete_line *incomplete = &i->line[j];
+		size_t start = incomplete->start;
+
+		switch (incomplete->sign) {
+		case '\0':
+		case '@':
+			push_parse_error(edited, start,
+					 ERR_FIRST_LINE_IS_INCOMPLETE);
+			break;
+		case ' ':
+			if (start < i->last_context)
+				push_parse_error(edited, start,
+						 ERR_INCOMPLETE_NOT_LAST);
+			else if (i->last_minus != SIZE_MAX && start < i->last_minus)
+				push_parse_error(edited, start,
+						 ERR_INCOMPLETE_CONTEXT_BEFORE_DELETION);
+			else if (i->last_plus != SIZE_MAX && start < i->last_plus)
+				push_parse_error(edited, start,
+						 ERR_INCOMPLETE_CONTEXT_BEFORE_ADDITION);
+			else if (context)
+				push_parse_error(edited, start,
+						 ERR_DUPLICATE_INCOMPLETE);
+			else
+				context = 1;
+			break;
+		case '-':
+			if (start < i->last_minus)
+				push_parse_error(edited, start,
+						 ERR_INCOMPLETE_NOT_LAST);
+			else if (minus)
+				push_parse_error(edited, start,
+						 ERR_DUPLICATE_INCOMPLETE);
+			else
+				minus = 1;
+			break;
+		case '+':
+			if (start < i->last_plus)
+				push_parse_error(edited, start,
+						 ERR_INCOMPLETE_NOT_LAST);
+			else if (plus)
+				push_parse_error(edited, start,
+						 ERR_DUPLICATE_INCOMPLETE);
+			else
+				plus = 1;
+			break;
+		}
+	}
+}
+
 static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 {
 	struct edited_hunk edited = EDITED_HUNK_INIT;
+	struct incomplete_line_data incomplete = INCOMPLETE_LINE_DATA_INIT;
 	size_t i, plain_len;
 	int in_hunk = 0;
+	char sign = '\0';
 
 	hunk->start = plain_len = s->plain.len;
 	for (i = 0; i < s->buf.len; ) {
@@ -1188,23 +1288,43 @@ static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 			edited.new_count++;
 			in_hunk = 1;
 			edited.context_only = 0;
+			sign = c;
+			incomplete.last_plus = i;
 			strbuf_add(&s->plain, s->buf.buf + i, next - i);
 			break;
 		case '-':
 			edited.old_count++;
 			in_hunk = 1;
 			edited.context_only = 0;
+			sign = c;
+			incomplete.last_minus = i;
 			strbuf_add(&s->plain, s->buf.buf + i, next - i);
 			break;
 		case ' ': case '\n': case '\r':
 			edited.old_count++;
 			edited.new_count++;
 			in_hunk = 1;
+			sign = ' ';
+			incomplete.last_context = i;
 			strbuf_add(&s->plain, s->buf.buf + i, next - i);
 			break;
 		case '\\':
-			in_hunk = 1;
-			strbuf_add(&s->plain, s->buf.buf + i, next - i);
+			/*
+			 * '\' line cannot be the first line or follow a '\'
+			 * line. Apply requires the '\' to be followed by a
+			 * space and the line to be at least 12 bytes long
+			 */
+			if (s->buf.buf[i + 1] == ' ' && next - i > 12) {
+				strbuf_add(&s->plain, s->buf.buf + i, next - i);
+				ALLOC_GROW(incomplete.line,
+					   incomplete.nr + 1, incomplete.alloc);
+				incomplete.line[incomplete.nr].sign = sign;
+				incomplete.line[incomplete.nr].start = i;
+
+			} else {
+				push_parse_error(&edited, i,
+						 ERR_BAD_INCOMPLETE_LINE);
+			}
 			break;
 		case '@': {
 			unsigned long old_off, new_off;
@@ -1230,6 +1350,7 @@ static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 				/* Ignore bad hunk header */
 				edited.start = next;
 			}
+			sign = c;
 			break;
 		}
 		default:
@@ -1239,6 +1360,8 @@ static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 		i = next;
 	}
 
+	process_incomplete(&edited, &incomplete);
+	incomplete_line_data_clear(&incomplete);
 	if (edited.err_nr) {
 		/* reset plain buf */
 		hunk->start = s->plain.len = plain_len;
