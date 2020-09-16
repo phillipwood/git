@@ -320,33 +320,52 @@ static int parse_range(const char **p,
 		       unsigned long *offset, unsigned long *count)
 {
 	char *pend;
+	unsigned long tmp;
 
+	offset = offset ? offset : &tmp;
 	*offset = strtoul(*p, &pend, 10);
 	if (pend == *p)
 		return -1;
 	if (*pend != ',') {
-		*count = 1;
+		if (count)
+			*count = 1;
 		*p = pend;
 		return 0;
 	}
+	count = count ? count : &tmp;
 	*count = strtoul(pend + 1, (char **)p, 10);
 	return *p == pend + 1 ? -1 : 0;
+}
+
+static const char* parse_hunk_header_line(const char *line,
+					  unsigned long *old_offset,
+					  unsigned long *old_count,
+					  unsigned long *new_offset,
+					  unsigned long *new_count)
+{
+	if (!skip_prefix(line, "@@ -", &line) ||
+	    parse_range(&line, old_offset, old_count) < 0 ||
+	    !skip_prefix(line, " +", &line) ||
+	    parse_range(&line, new_offset, new_count) < 0 ||
+	    !skip_prefix(line, " @@", &line))
+		return NULL;
+
+	return line;
 }
 
 static int parse_hunk_header(struct add_p_state *s, struct hunk *hunk)
 {
 	struct hunk_header *header = &hunk->header;
-	const char *line = s->plain.buf + hunk->start, *p = line;
-	char *eol = memchr(p, '\n', s->plain.len - hunk->start);
+	const char *line = s->plain.buf + hunk->start, *p;
+	char *eol = memchr(line, '\n', s->plain.len - hunk->start);
 
 	if (!eol)
 		eol = s->plain.buf + s->plain.len;
 
-	if (!skip_prefix(p, "@@ -", &p) ||
-	    parse_range(&p, &header->old_offset, &header->old_count) < 0 ||
-	    !skip_prefix(p, " +", &p) ||
-	    parse_range(&p, &header->new_offset, &header->new_count) < 0 ||
-	    !skip_prefix(p, " @@", &p))
+	p = parse_hunk_header_line(line,
+				   &header->old_offset, &header->old_count,
+				   &header->new_offset, &header->new_count);
+	if (!p)
 		return error(_("could not parse hunk header '%.*s'"),
 			     (int)(eol - line), line);
 
