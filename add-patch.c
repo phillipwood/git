@@ -1160,6 +1160,83 @@ static void matches_clear(struct matches *matches)
 	free(matches->match);
 }
 
+enum direction { MATCH = 0, DELETION, ADDITION };
+
+struct mismatches {
+	size_t alloc, nr;
+	struct mismatch {
+		enum direction direction;
+		size_t i, j, k;
+	} *mismatch;
+};
+
+#define MISMATCHES_INIT { 0 }
+
+static void mismatches_clear(struct mismatches *m)
+{
+	free(m->mismatch);
+}
+
+static void set_direction(uint8_t *data, size_t i, enum direction dir)
+{
+	unsigned shift = 2 * (i & 3);
+
+	data[i / 4] |= dir << shift;
+}
+
+static enum direction get_direction(uint8_t *data, size_t i)
+{
+	unsigned shift = 2 * (i & 3);
+
+	return (data[i / 4] & (3 << shift)) >> shift;
+}
+
+static void fill_mismatches(uint8_t *data, struct line_array *a,
+			    struct line_array *b, struct mismatches *m)
+{
+	size_t i = a->nr, j = b->nr;
+
+	while (i && j) {
+		enum direction d = get_direction(data, (i - 1) * b->nr + j - 1);
+
+		if (m->nr && d == m->mismatch[m->nr - 1].direction) {
+			struct mismatch *mismatch = &m->mismatch[m->nr - 1];
+
+			mismatch->i = i - 1;
+			mismatch->j = j - 1;
+		} else {
+			struct mismatch mismatch = {
+				.direction = d,
+				.i = i - 1,
+				.j = j - 1,
+				.k = d == DELETION ? i - 1 : j - 1,
+			};
+
+			ALLOC_GROW(m->mismatch, m->nr + 1, m->alloc);
+			m->mismatch[m->nr++] = mismatch;
+		}
+		if (d == MATCH || d == DELETION)
+			i--;
+		if (d == MATCH || d == ADDITION)
+			j--;
+	}
+	if (i) {
+		struct mismatch mismatch = {
+			.direction = DELETION, .i = 0, .j = 0, .k = i - 1,
+		};
+
+		ALLOC_GROW(m->mismatch, m->nr + 1, m->alloc);
+		m->mismatch[m->nr++] = mismatch;
+	} else if (j) {
+		struct mismatch mismatch = {
+			.direction = ADDITION, .i = 0, .j = 0, .k = j - 1,
+		};
+
+		ALLOC_GROW(m->mismatch, m->nr + 1, m->alloc);
+		m->mismatch[m->nr++] = mismatch;
+	}
+}
+
 static int line_eq(const char *base_a, struct line *a,
 		   const char *base_b, struct line *b)
 {
@@ -1189,15 +1266,18 @@ static void push_line(struct line_array *lines, size_t start, size_t len)
 }
 
 static void lcs(struct line_array *a, struct line_array *b,
-		struct matches *matches, struct repository *r)
+		struct matches *matches, struct mismatches *mismatches,
+		struct repository *r)
 {
 	size_t *last_seq, *last_str;
 	size_t i, j, len_str, last_len_str = 0;
 	size_t len_seq = 0, last_len_seq = 0;
+	uint8_t *data;
 
 	trace2_region_enter("add-p", "lcs", r);
 	CALLOC_ARRAY(last_str, st_sub(b->nr, 1));
 	CALLOC_ARRAY(last_seq, b->nr);
+	CALLOC_ARRAY(data, st_mult(a->nr, b->nr) / 4 + 1);
 	for (i = 0; i < a->nr; i++) {
 		last_len_seq = 0;
 		for (j = 0; j < b->nr; j++) {
@@ -1210,6 +1290,7 @@ static void lcs(struct line_array *a, struct line_array *b,
 					len_seq = last_seq[j - 1] + 1;
 					len_str = last_str[j - 1] + 1;
 				}
+				set_direction(data, i * b->nr + j, MATCH);
 				if (len_str > matches->len_str) {
 					matches->len_str = len_str;
 					matches->nr = 0;
@@ -1226,9 +1307,11 @@ static void lcs(struct line_array *a, struct line_array *b,
 					matches->match[matches->nr++] = m;
 				}
 			} else if (!j || last_len_seq < last_seq[j]) {
+				set_direction(data, i * b->nr + j, DELETION);
 				len_seq = last_seq[j];
 				len_str = 0;
 			} else {
+				set_direction(data, i * b->nr + j, ADDITION);
 				len_seq = last_len_seq;
 				len_str = 0;
 			}
@@ -1242,6 +1325,10 @@ static void lcs(struct line_array *a, struct line_array *b,
 		last_seq[j - 1] = last_len_seq;
 	}
 	matches->len_seq = len_seq;
+
+	if (matches->len_seq != matches->len_str)
+		fill_mismatches(data, a, b, mismatches);
+	free(data);
 	free(last_str);
 	free(last_seq);
 	trace2_region_leave("add-p", "lcs", r);
@@ -1441,13 +1528,16 @@ static int check_edited_image(struct add_p_state *s, struct hunk *hunk,
 			      struct edited_hunk *edited)
 {
 	struct matches matches = MATCHES_INIT;
+	struct mismatches mismatches = MISMATCHES_INIT;
 	int res = 0;
 
 	if (!hunk->orig_image.nr || !edited->image.nr)
 		return 0;
 
-	lcs(&hunk->orig_image, &edited->image, &matches, s->s.r);
+	lcs(&hunk->orig_image, &edited->image, &matches, &mismatches,
+	    s->s.r);
 	res = check_edited_hunk_header(&matches, hunk, edited);
+	mismatches_clear(&mismatches);
 	matches_clear(&matches);
 
 	return res;
@@ -1634,8 +1724,7 @@ static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 
 	process_incomplete(&edited, &incomplete);
 	incomplete_line_data_clear(&incomplete);
-	if (!edited.err_nr)
-		res = check_edited_image(s, hunk, &edited);
+	res = check_edited_image(s, hunk, &edited);
 
 	if (edited.err_nr || res) {
 		/* reset plain buf */
