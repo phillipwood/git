@@ -1215,20 +1215,22 @@ static void update_rewritten(const struct repository *r,
 			return;
 		rewritten_head = &oid;
 	}
+	fprintf(stderr, "rewritten head %s %s %s\n",oid_to_hex(rewritten_head),
+		oid_to_hex(old_head),
+		oid_to_hex(new_head));
 	if (oideq(old_head, rewritten_head)) {
 		FILE *fp;
 		fp = fopen_or_warn(rebase_path_rewritten_list(), "a");
 		if (fp) {
+			fprintf(stderr, "updating rewritten\n");
 			fprintf(fp, "%s %s\n",
 			    oid_to_hex(old_head), oid_to_hex(new_head));
 			fclose(fp);
 		}
 		oidcpy(rewritten_head, new_head);
+		if (rewritten_head == &oid)
+			write_rewritten_head(rewritten_head);
 	}
-	if (rewritten_head == &oid)
-		write_rewritten_head(rewritten_head);
-
-	return;
 }
 
 void commit_post_rewrite(struct repository *r,
@@ -2061,7 +2063,6 @@ static void flush_rewritten_pending(struct repository* r,
 	struct strbuf buf = STRBUF_INIT;
 	struct object_id newoid;
 	FILE *out;
-	size_t hexsz = r->hash_algo->hexsz;
 
 	if (strbuf_read_file(&buf, rebase_path_rewritten_pending(), (GIT_MAX_HEXSZ + 1) * 2) > 0 &&
 	    !get_oid("HEAD", &newoid) &&
@@ -2071,9 +2072,8 @@ static void flush_rewritten_pending(struct repository* r,
 
 		while (*bol) {
 			eol = strchrnul(bol, '\n');
-			if (memcmp(bol, head, hexsz))
-				fprintf(out, "%.*s %s\n", (int)(eol - bol), bol,
-					head);
+			fprintf(out, "%.*s %s\n", (int)(eol - bol), bol,
+				head);
 			if (!*eol)
 				break;
 			bol = eol + 1;
