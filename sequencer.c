@@ -2008,21 +2008,24 @@ static int update_squash_messages(struct repository *r,
 	return res;
 }
 
-static void flush_rewritten_pending(void)
+static void flush_rewritten_pending(struct repository* r)
 {
 	struct strbuf buf = STRBUF_INIT;
 	struct object_id newoid;
 	FILE *out;
+	size_t hexsz = r->hash_algo->hexsz;
 
 	if (strbuf_read_file(&buf, rebase_path_rewritten_pending(), (GIT_MAX_HEXSZ + 1) * 2) > 0 &&
 	    !get_oid("HEAD", &newoid) &&
 	    (out = fopen_or_warn(rebase_path_rewritten_list(), "a"))) {
 		char *bol = buf.buf, *eol;
+		char *head = oid_to_hex(&newoid);
 
 		while (*bol) {
 			eol = strchrnul(bol, '\n');
-			fprintf(out, "%.*s %s\n", (int)(eol - bol),
-					bol, oid_to_hex(&newoid));
+			if (memcmp(bol, head, hexsz))
+				fprintf(out, "%.*s %s\n", (int)(eol - bol), bol,
+					head);
 			if (!*eol)
 				break;
 			bol = eol + 1;
@@ -2033,7 +2036,7 @@ static void flush_rewritten_pending(void)
 	strbuf_release(&buf);
 }
 
-static void record_in_rewritten(struct object_id *oid,
+static void record_in_rewritten(struct repository *r, struct object_id *oid,
 		enum todo_command next_command)
 {
 	FILE *out = fopen_or_warn(rebase_path_rewritten_pending(), "a");
@@ -2045,7 +2048,7 @@ static void record_in_rewritten(struct object_id *oid,
 	fclose(out);
 
 	if (!is_fixup(next_command))
-		flush_rewritten_pending();
+		flush_rewritten_pending(r);
 }
 
 static int should_edit(struct replay_opts *opts) {
@@ -4397,7 +4400,8 @@ static int pick_commits(struct repository *r,
 					arg, item->arg_len, opts, res, !res);
 			}
 			if (is_rebase_i(opts) && !res)
-				record_in_rewritten(&item->commit->object.oid,
+				record_in_rewritten(r,
+						    &item->commit->object.oid,
 					peek_command(todo_list, 1));
 			if (res && is_fixup(item->command)) {
 				if (res == 1)
@@ -4451,7 +4455,7 @@ static int pick_commits(struct repository *r,
 					    item->flags, &check_todo, opts)) < 0)
 				reschedule = 1;
 			else if (item->commit)
-				record_in_rewritten(&item->commit->object.oid,
+				record_in_rewritten(r, &item->commit->object.oid,
 						    peek_command(todo_list, 1));
 			if (res > 0)
 				/* failed with merge conflicts */
@@ -4552,7 +4556,7 @@ cleanup_head_ref:
 				log_tree_diff_flush(&log_tree_opt);
 			}
 		}
-		flush_rewritten_pending();
+		flush_rewritten_pending(r);
 		if (!stat(rebase_path_rewritten_list(), &st) &&
 				st.st_size > 0) {
 			struct child_process child = CHILD_PROCESS_INIT;
@@ -4826,7 +4830,8 @@ int sequencer_continue(struct repository *r, struct replay_opts *opts)
 		if (read_oneliner(&buf, rebase_path_stopped_sha(),
 				  READ_ONELINER_SKIP_IF_EMPTY) &&
 		    !get_oid_hex(buf.buf, &oid))
-			record_in_rewritten(&oid, peek_command(&todo_list, 0));
+			record_in_rewritten(r, &oid,
+					    peek_command(&todo_list, 0));
 		strbuf_release(&buf);
 	}
 
@@ -5624,7 +5629,8 @@ static int skip_unnecessary_picks(struct repository *r,
 		todo_list->done_nr += i;
 
 		if (is_fixup(peek_command(todo_list, 0)))
-			record_in_rewritten(base_oid, peek_command(todo_list, 0));
+			record_in_rewritten(r, base_oid,
+					    peek_command(todo_list, 0));
 	}
 
 	return 0;
