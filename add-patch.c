@@ -1235,6 +1235,11 @@ static void fill_mismatches(uint8_t *data, struct line_array *a,
 		ALLOC_GROW(m->mismatch, m->nr + 1, m->alloc);
 		m->mismatch[m->nr++] = mismatch;
 	}
+
+	for (i = m->nr; i > 0; i--)
+		fprintf(stderr, "%s %lu %lu\n", m->mismatch[i - 1].direction == MATCH ? "MATCH" :
+			m->mismatch[i - 1].direction == DELETION ? "DELETION" : "ADDITION",
+			m->mismatch[i - 1].i,m->mismatch[i - 1].j);
 }
 
 static int line_eq(const char *base_a, struct line *a,
@@ -1335,6 +1340,8 @@ static void lcs(struct line_array *a, struct line_array *b,
 }
 
 enum hunk_error_id {
+	ERR_ADDITION,
+	ERR_DELETION,
 	ERR_BAD_LINE,
 	ERR_DUPLICATE_HEADER,
 	ERR_HEADER_NOT_FIRST_LINE,
@@ -1348,14 +1355,14 @@ enum hunk_error_id {
 
 struct hunk_error {
 	enum hunk_error_id id;
-	size_t pos;
+	size_t pos, start, len, count;
 };
 
 struct edited_hunk {
 	struct line_array image;
 	struct hunk_error *err;
 	size_t err_alloc, err_nr;
-	size_t start;
+	size_t start, end;
 	unsigned has_hunk_header :1, context_only :1;
 	unsigned long old_offset, old_count, new_offset, new_count;
 };
@@ -1387,11 +1394,217 @@ static int hunk_error_cmp(const void *a, const void *b)
 
 	return (e2->pos < e1->pos) - (e1->pos < e2->pos);
 }
+#if 0
+struct mismatch_state {
+	struct line_array *edited_image;
+	struct line_array *orig_image;
+	struct mismatches *mismatches;
+	enum direction direction;
+	size_t edited_end, start, next, last_match, off;
+};
+
+#define MISMATCH_STATE_INIT(edited, hunk) {		\
+		.edited_image = &edited->image, 	\
+		.edited_end = edited->end,		\
+		.mismatches = &edited->mismatches,	\
+		.orig_image = &hunk->orig_image,	\
+	}
+
+static struct mismatch *mismatch(struct mismatch_state *ms, size_t i)
+{
+	return &ms->mismatches->mismatch[ms->mismatches->nr - 1 - i];
+}
+
+static struct line *orig_line(struct mismatch_state *ms, size_t i)
+{
+	return &ms->orig_image->line[mismatch(ms, i)->i];
+}
+
+static struct line *edited_line(struct mismatch_state *ms, size_t i)
+{
+	return &ms->edited_image->line[mismatch(ms, i)->j];
+}
+
+static void handle_added_line(struct mismatch_state *ms, size_t i)
+{
+	size_t j = i + 1;
+
+	while (j < ms->mismatches->nr &&
+	       mismatch(ms, j)->direction == ADDITION &&
+	       edited_line(ms, j)->nr == edited_line(ms, j - 1)->nr + 1)
+		j++;
+	fprintf(stderr, "addition %lu %lu %lu %lu\n", i, j-1,
+		edited_line(ms,i)->nr, edited_line(ms, j-1)->nr);
+	ms->direction = ADDITION;
+	ms->start = i;
+	ms->next = j;
+	ms->off = edited_line(ms, i)->start;
+}
+
+static void handle_removed_line(struct mismatch_state *ms, size_t i)
+{
+	size_t mismatch_nr = ms->mismatches->nr, j = i + 1;
+
+	while (j < mismatch_nr && mismatch(ms, j)->direction == DELETION &&
+	       orig_line(ms, j)->nr == orig_line(ms, j - 1)->nr + 1)
+	     j++;
+	ms->direction = DELETION;
+	ms->start = i;
+	ms->next = j;
+	fprintf(stderr, "%lu %lu %lu %lu\n", i, j-1,orig_line(ms,i)->nr,
+		orig_line(ms, j-1)->nr);
+	if (ms->last_match != NO_LAST_MATCH &&
+	    orig_line(ms, i)->nr == orig_line(ms, ms->last_match)->nr + 1) {
+		fprintf(stderr, "after context\n");
+		ms->off = edited_line(ms, ms->last_match)->start +
+			  edited_line(ms, ms->last_match)->len;
+	} else if (j == mismatch_nr) { fprintf(stderr, "at end\n");
+		ms->off = ms->edited_end;
+	} else if ((mismatch(ms, j)->direction == MATCH &&
+		    orig_line(ms, j)->nr == orig_line(ms, j - 1)->nr + 1) ||
+		   (mismatch(ms, j)->direction == ADDITION &&
+		    orig_line(ms, j)->nr == orig_line(ms, j - 1)->nr)) {
+		ms->off = edited_line(ms, j)->start;
+		fprintf(stderr, "before context\n");
+	} else {
+		error("cannot handle removed line");
+	}
+}
+
+static void find_next_mismatch(struct mismatch_state *ms)
+{
+	size_t i;
+	size_t mismatch_nr = ms->mismatches->nr;
+
+	ms->last_match = NO_LAST_MATCH;
+	for (i = ms->next;
+	     i < mismatch_nr && mismatch(ms, i)->direction == MATCH;
+	     i++)
+		ms->last_match = i;
+	if (i == mismatch_nr) {
+		ms->next = i;
+		ms->off = SIZE_MAX;
+	} else if (mismatch(ms, i)->direction == DELETION) {
+		handle_removed_line(ms, i);
+	} else {
+		handle_added_line(ms, i);
+	}
+}
+#endif
+static void push_mismatch_error(struct edited_hunk *edited,
+				enum hunk_error_id id, size_t pos,
+				size_t start, size_t len, size_t count)
+{
+	struct hunk_error e = {
+		.id = id,
+		.pos = pos,
+		.start = start,
+		.len = len,
+		.count = count
+	};
+	fprintf(stderr, "pushing mismatch %d %zu\n", id, pos);
+	ALLOC_GROW(edited->err, edited->err_nr + 1, edited->err_alloc);
+	edited->err[edited->err_nr++] = e;
+}
+
+static void push_mismatch_errors(struct edited_hunk *edited,
+				 struct line_array *orig,
+				 struct mismatches *mismatches)
+{
+	size_t i;/*, last_match_i = SIZE_MAX, last_match_j = SIZE_MAX;*/
+	for (i = mismatches->nr; i > 0; i--) {
+		struct mismatch *m = &mismatches->mismatch[i - 1];
+
+/*		if (m->direction == MATCH) {
+			last_match_j = m->k;
+			last_match_i = m->i + m->k - m->j;
+			} else*/ if (m->direction == DELETION) {
+			struct line *edited_line = edited->image.line;
+			struct line *line = orig->line;
+			size_t pos = edited_line[m->j].start;
+			size_t i = m->i;
+			size_t start = line[i].start;
+			size_t end = start + line[i].len;
+			size_t count = 1;
+
+			for (++i; i <= m->k; i++) {
+				if (line[i].start == end) {
+					count++;
+					end += line[i].len;
+				} else {
+					push_mismatch_error(edited,
+							    ERR_DELETION, pos,
+							    start, end - start,
+							    count);
+					count = 1;
+					start = line[i].start;
+					end = start + line[i].len;
+				}
+			}
+			push_mismatch_error(edited, ERR_DELETION, pos, start,
+					    end - start, count);
+		} else if (m->direction == ADDITION) {
+			struct line *line = edited->image.line;
+			size_t i = m->j;
+			size_t start = line[i].start;
+			size_t end = start + line[i].len;
+			size_t count = 1;
+
+			for (++i; i <= m->k; i++) {
+				if (line[i].start == end) {
+					count++;
+					end += line[i].len;
+				} else {
+					push_mismatch_error(edited,
+							    ERR_ADDITION, start,
+							    start, end - start,
+							    count);
+					count = 1;
+					start = line[i].start;
+					end = start + line[i].len;
+				}
+			}
+			push_mismatch_error(edited, ERR_ADDITION, start,
+					    start, end - start, count);
+		}
+	}
+}
+
+static void insert_deletion(struct hunk_error *error,
+			    struct line_array *orig,
+			    struct strbuf *buf)
+{
+	strbuf_addf(buf,
+		    ngettext("%s restored %lu missing line\n",
+			     "%s restored %lu missing lines\n", error->count),
+		    comment_line_str, error->count);
+	/*
+	 *  The source string comes from the buffer we are adding it to
+	 *  so we need to grow the buffer ourselves to ensure it is not
+	 *  reallocated by strbuf_add().
+	 */
+	strbuf_grow(buf, error->len);
+	strbuf_add(buf, orig->buf->buf + error->start, error->len);
+}
+
+static void insert_addition(struct hunk_error *error,
+			    struct line_array *edited,
+			    struct strbuf *buf)
+{
+	strbuf_addf(buf,
+		    ngettext("%s removed %lu extra line\n",
+			     "%s removed %lu extra lines\n", error->count),
+		    comment_line_str, error->count);
+	strbuf_add_commented_lines(buf, edited->buf->buf + error->start,
+				   error->len, comment_line_str);
+}
 
 static void insert_hunk_errors(struct add_p_state *s,
-			       struct edited_hunk *edited)
+			       struct edited_hunk *edited,
+			       struct hunk *hunk)
 {
 	static const char *msg[] = {
+		NULL, NULL,
 		N_("invalid line"),
 		N_("can only handle a single hunk"),
 		N_("hunk header must be the first line"),
@@ -1403,14 +1616,33 @@ static void insert_hunk_errors(struct add_p_state *s,
 		N_("'\\' must be last line"),
 	};
 	size_t i = edited->start, j = 0;
+
 	QSORT(edited->err, edited->err_nr, hunk_error_cmp);
+	for (j = 0; j < edited->err_nr; j++)
+		fprintf(stderr, "error %d %zu %zu\n", edited->err[j].id, edited->err[j].pos, edited->err[j].len);
+	j = 0;
 	while (i < s->buf.len) {
 		size_t next = find_next_line(&s->buf, i);
 
-		if (j < edited->err_nr && edited->err[j].pos == i)
-			strbuf_addf(&s->plain, _("%s error: %s\n"),
-				    comment_line_str,
-				    _(msg[edited->err[j++].id]));
+	again:
+		if (j < edited->err_nr && edited->err[j].pos == i) {
+			struct hunk_error *error = &edited->err[j++];
+			fprintf(stderr, "error %d (%zu/%zu)\n", error->id,j+1,edited->err_nr);
+			if (error->id == ERR_DELETION) {
+				insert_deletion(error, &hunk->orig_image,
+						&s->plain);
+				goto again;
+			} else if (error->id == ERR_ADDITION) {
+				insert_addition(error, &edited->image,
+						&s->plain);
+				i += error->len;
+				continue;
+			} else {
+				strbuf_addf(&s->plain, _("%s error: %s\n"),
+					    comment_line_str,
+					    _(msg[error->id]));
+			}
+		}
 		if (!starts_with(s->buf.buf + i, comment_line_str))
 			strbuf_add(&s->plain, s->buf.buf + i, next - i);
 		i = next;
@@ -1536,6 +1768,7 @@ static int check_edited_image(struct add_p_state *s, struct hunk *hunk,
 
 	lcs(&hunk->orig_image, &edited->image, &matches, &mismatches,
 	    s->s.r);
+	push_mismatch_errors(edited, &hunk->orig_image, &mismatches);
 	res = check_edited_hunk_header(&matches, hunk, edited);
 	mismatches_clear(&mismatches);
 	matches_clear(&matches);
@@ -1719,6 +1952,9 @@ static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 			if (!starts_with(s->buf.buf + i, comment_line_str))
 				push_parse_error(&edited, i, ERR_BAD_LINE);
 		}
+		if (!starts_with(s->buf.buf + i, comment_line_str))
+			edited.end = next;
+
 		i = next;
 	}
 
@@ -1729,7 +1965,7 @@ static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 	if (edited.err_nr || res) {
 		/* reset plain buf */
 		hunk->start = s->plain.len = plain_len;
-		insert_hunk_errors(s, &edited);
+		insert_hunk_errors(s, &edited, hunk);
 		hunk->end = s->plain.len;
 		edited_hunk_clear(&edited);
 		return -1;

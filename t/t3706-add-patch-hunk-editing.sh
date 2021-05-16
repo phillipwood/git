@@ -75,7 +75,8 @@ test_expect_success 'setup' '
 
 	test_set_editor "$(pwd)/editor" &&
 	test_write_lines a b c a b c a b c >file &&
-	git add file &&
+	test_write_lines a b c d e f g h i >file-1 &&
+	git add file file-1 &&
 	git commit -minitial &&
 	git tag initial &&
 	test_tick
@@ -98,7 +99,8 @@ check_staged_contents() {
 check_unedited_hunk() {
 	n="$1" &&
 	cat >expected-hunk
-	sed -n "/^# error:/p;/^#/!p" unedited-hunk-$n >actual-hunk &&
+	sed -n "/^# error:/p;/^# restored:/p;/^#/!p" unedited-hunk-$n \
+		>actual-hunk &&
 	test_cmp expected-hunk actual-hunk
 }
 
@@ -118,6 +120,17 @@ check_hunk_header() {
 	grep ^@ unedited-hunk-1 >expected-header &&
 	test_cmp expected-header actual-header
 }
+
+test_expect_success 'adding lines to preimage' '
+	test_when_finished cleanup &&
+	test_write_lines a x b c a y b c z a b c >file &&
+	test_write_lines e y |
+	SED_CMD_1="-n;/^+x/c\;-p\; q\;bad\; r;/^+y/c\; w;/^+z/{n;d;};p" \
+	git add -p &&
+# todo test deleted context either side of addition and between two additions
+touch expect &&
+	test_cmp expect unedited-hunk-2
+'
 
 test_expect_success 'leaving only context lines or empty hunk asks again' '
 	test_when_finished cleanup &&
@@ -149,13 +162,14 @@ test_expect_success 'detect bad lines' '
 	# 2 - Fix the bad lines
 	test_write_lines e y q |
 	SED_CMD_1="/^+x/c\;@@ -5,2 +6,3 @@;/^+z/c\;@@ z;s/^ c/c/;/^#.*[+-]/d" \
-	SED_CMD_2="/^@@ -5/d;/^@@ z/c\;+z;s/^c/ c/" \
+	SED_CMD_2="/^@@ -5/d;/^@@ z/c\;+z;/^c/d" \
 	git add -p &&
 
 	# Check that the instructions are the same the second time the hunk
 	# is edited
 	grep "^#" unedited-hunk-1 >expected-instructions &&
-	sed -n "/^# error:/d;/^#/p" unedited-hunk-2 >actual-instructions &&
+	sed -n "/^# error:/d;/^# restored/d;/^#/p" unedited-hunk-2 \
+		>actual-instructions &&
 	test_cmp expected-instructions actual-instructions &&
 
 	# Check the error comments
@@ -170,6 +184,8 @@ test_expect_success 'detect bad lines' '
 	@@ z
 	# error: invalid line
 	c
+	# restored 1 missing line
+	 c
 	 a
 	 b
 	EOF
@@ -265,8 +281,8 @@ test_expect_success 'detect bad preimage' '
 	# 3 - Change bad deletion back into insertion
 	test_write_lines e y y q |
 	SED_CMD_1="s/^+0/ 1/" \
-	SED_CMD_2="s/^ 1/-2/" \
-	SED_CMD_3="s/^-2/+3/" \
+	SED_CMD_2="s/^# 1/-2/" \
+	SED_CMD_3="s/^#-2/+3/" \
 	git add -p &&
 
 	check_staged_contents file a b c a 3 b c a b c
@@ -370,6 +386,84 @@ test_expect_success 'lines deleted from beginning and added to end of preimage' 
 	 c
 	EOF
 	f a b c a b z c a b c
+'
+
+g () {
+	test_when_finished cleanup &&
+	test_write_lines e y q >input &&
+	HUNK_FILE_1=hunk.txt git add -p <input &&
+	grep -e '^[^#]' -e '^# error:' -e '^# restored' -e '^# removed' unedited-hunk-2 >actual &&
+	test_cmp expect actual &&
+	check_staged_contents file-1 "$@"
+}
+
+test_expect_success 'removed premage lines are restored' '
+	test_write_lines a b c x d f g q i >file-1 &&
+	cat >hunk.txt <<-\EOF &&
+	 a
+	 b
+	+y
+	+z
+	 g
+	 h
+	+Q
+	EOF
+	cat >expect <<-\EOF &&
+	@@ -1,9 +1,9 @@
+	 a
+	 b
+	# restored 1 missing line
+	 c
+	+y
+	+z
+	# restored 3 missing lines
+	 d
+	-e
+	 f
+	 g
+	 h
+	+Q
+	# restored 1 missing line
+	 i
+	EOF
+	g a b c y z d f g h Q i
+'
+
+test_expect_success 'removed premage lines are restored and added preimage lines are removed' '
+	test_write_lines a b c x d f g i >file-1 &&
+	cat >hunk.txt <<-\EOF &&
+	 a
+	 b
+	 p
+	+z
+	 q
+	 g
+	 r
+	-s
+	 h
+	 i
+	EOF
+	cat >expect <<-\EOF &&
+	@@ -1,9 +1,11 @@
+	 a
+	 b
+	# restored 1 missing line
+	 c
+	# removed 1 added line
+	# p
+	+x
+	# removed 1 added line
+	# q
+	# restored 3 missing lines
+	 d
+	 e
+	 f
+	 g
+	+z
+	 h
+	 i
+	EOF
+	g a b c x d e f g z h i
 '
 
 test_done
