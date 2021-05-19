@@ -118,22 +118,25 @@ check_hunk_header() {
 	test_cmp expected-header actual-header
 }
 
-test_expect_success 'leaving hunk empty asks again' '
+test_expect_success 'leaving only context lines or empty hunk asks again' '
 	test_when_finished cleanup &&
 	test_write_lines a x c a b c a y b c >file &&
 	# 1 - Comment out hunk
 	# 2 - Delete hunk
 	# 3 - Delete everything
-	# 4 - Split hunk and stage second half
-	test_write_lines e e e s n y  q |
+	# 4 - Leave only context lines
+	# 5 - Split hunk and stage second half
+	test_write_lines e e e e s n y  q |
 	SED_CMD_1="s/^[^#]/#&/" \
 	SED_CMD_2="/^[^#]/d" \
 	SED_CMD_3="d" \
+	SED_CMD_4="/^+/d;s/^-/ /" \
 	git add -p &&
 
 	# Check hunk is restored before each edit
 	test_cmp unedited-hunk-1 unedited-hunk-2 &&
 	test_cmp unedited-hunk-1 unedited-hunk-3 &&
+	test_cmp unedited-hunk-1 unedited-hunk-4 &&
 
 	check_staged_contents file a b c a b c a y b c
 '

@@ -1134,11 +1134,11 @@ struct edited_hunk {
 	struct hunk_error *err;
 	size_t err_alloc, err_nr;
 	size_t start;
-	unsigned has_hunk_header :1;
+	unsigned has_hunk_header :1, context_only :1;
 	unsigned long old_offset, old_count, new_offset, new_count;
 };
 
-#define EDITED_HUNK_INIT { 0 }
+#define EDITED_HUNK_INIT { .context_only = 1 }
 
 static void push_parse_error(struct edited_hunk *edited,
 			     size_t pos,
@@ -1187,11 +1187,13 @@ static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 		case '+':
 			edited.new_count++;
 			in_hunk = 1;
+			edited.context_only = 0;
 			strbuf_add(&s->plain, s->buf.buf + i, next - i);
 			break;
 		case '-':
 			edited.old_count++;
 			in_hunk = 1;
+			edited.context_only = 0;
 			strbuf_add(&s->plain, s->buf.buf + i, next - i);
 			break;
 		case ' ': case '\n': case '\r':
@@ -1246,7 +1248,8 @@ static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 	}
 
 	hunk->end = s->plain.len;
-	if (hunk->end == hunk->start && !edited.has_hunk_header)
+	if ((hunk->end == hunk->start && !edited.has_hunk_header) ||
+	    (hunk->end != hunk->start && edited.context_only))
 		/* The user aborted editing by deleting everything */
 		return 0;
 
