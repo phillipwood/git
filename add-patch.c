@@ -14,6 +14,7 @@
 #include "color.h"
 #include "compat/terminal.h"
 #include "prompt.h"
+#include "trace2.h"
 
 enum prompt_mode_type {
 	PROMPT_MODE_CHANGE = 0, PROMPT_DELETION, PROMPT_ADDITION, PROMPT_HUNK,
@@ -1188,12 +1189,13 @@ static void push_line(struct line_array *lines, size_t start, size_t len)
 }
 
 static void lcs(struct line_array *a, struct line_array *b,
-		struct matches *matches)
+		struct matches *matches, struct repository *r)
 {
 	size_t *last_seq, *last_str;
 	size_t i, j, len_str, last_len_str = 0;
 	size_t len_seq = 0, last_len_seq = 0;
 
+	trace2_region_enter("add-p", "lcs", r);
 	CALLOC_ARRAY(last_str, st_sub(b->nr, 1));
 	CALLOC_ARRAY(last_seq, b->nr);
 	for (i = 0; i < a->nr; i++) {
@@ -1242,6 +1244,7 @@ static void lcs(struct line_array *a, struct line_array *b,
 	matches->len_seq = len_seq;
 	free(last_str);
 	free(last_seq);
+	trace2_region_leave("add-p", "lcs", r);
 }
 
 enum hunk_error_id {
@@ -1443,7 +1446,7 @@ static int check_edited_image(struct add_p_state *s, struct hunk *hunk,
 	if (!hunk->orig_image.nr || !edited->image.nr)
 		return 0;
 
-	lcs(&hunk->orig_image, &edited->image, &matches);
+	lcs(&hunk->orig_image, &edited->image, &matches, s->s.r);
 	res = check_edited_hunk_header(&matches, hunk, edited);
 	matches_clear(&matches);
 
