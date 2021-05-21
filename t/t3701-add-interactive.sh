@@ -1064,10 +1064,10 @@ test_expect_success 'set up pathological context' '
 	git commit -m a &&
 	test_write_lines c b a a a a a a a b a a a a >a &&
 	test_write_lines     a a a a a a a b a a a a >expected-1 &&
-	test_write_lines   b a a a a a a a b a a a a >expected-2 &&
-	# check editing can cope with missing header and deleted context lines
-	# as well as changes to other lines
-	test_write_lines +b " a" >patch
+	test_write_lines       b a a a a a b a a a a >expected-2 &&
+	# check editing can cope with missing header and copes with pathological
+	# context lines
+	test_write_lines +b -a -a " a" >patch
 '
 
 test_expect_success 'add -p works with pathological context lines' '
