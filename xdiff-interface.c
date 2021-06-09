@@ -307,7 +307,7 @@ int git_xmerge_config(const char *var, const char *value, void *cb)
 		if (!value)
 			die("'%s' is not a boolean", var);
 		if (!strcmp(value, "diff3"))
-			git_xmerge_style = XDL_MERGE_DIFF3;
+			git_xmerge_style = XDL_MERGE_STYLE_DIFF3;
 		else if (!strcmp(value, "merge"))
 			git_xmerge_style = 0;
 		/*
