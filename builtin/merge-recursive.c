@@ -4,6 +4,7 @@
 #include "tag.h"
 #include "merge-recursive.h"
 #include "xdiff-interface.h"
+#include "config.h"
 
 static const char builtin_merge_recursive_usage[] =
 	"git %s <base>... -- <head> <remote> ...";
@@ -29,6 +30,8 @@ int cmd_merge_recursive(int argc, const char **argv, const char *prefix)
 	struct merge_options o;
 	char *better1, *better2;
 	struct commit *result;
+
+	git_config(git_xmerge_config, NULL);
 
 	init_merge_options(&o, the_repository);
 	if (argv[0] && ends_with(argv[0], "-subtree"))

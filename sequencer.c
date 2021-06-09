@@ -34,6 +34,7 @@
 #include "commit-reach.h"
 #include "rebase-interactive.h"
 #include "reset.h"
+#include "xdiff-interface.h"
 
 #define GIT_REFLOG_ACTION "GIT_REFLOG_ACTION"
 
@@ -221,6 +222,10 @@ static int git_sequencer_config(const char *k, const char *v, void *cb)
 	}
 
 	status = git_gpg_config(k, v, NULL);
+	if (status)
+		return status;
+
+	status = git_xmerge_config(k, v, NULL);
 	if (status)
 		return status;
 

@@ -43,6 +43,7 @@
 #include "commit-reach.h"
 #include "wt-status.h"
 #include "commit-graph.h"
+#include "xdiff-interface.h"
 
 #define DEFAULT_TWOHEAD (1<<0)
 #define DEFAULT_OCTOPUS (1<<1)
@@ -659,6 +660,9 @@ static int git_merge_config(const char *k, const char *v, void *cb)
 	if (status)
 		return status;
 	status = git_gpg_config(k, v, NULL);
+	if (status)
+		return status;
+	status = git_xmerge_config(k, v, NULL);
 	if (status)
 		return status;
 	return git_diff_ui_config(k, v, cb);

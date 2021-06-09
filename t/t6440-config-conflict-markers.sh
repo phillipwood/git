@@ -89,4 +89,35 @@ test_expect_success 'notes' '
 	)
 '
 
+test_expect_success 'checkout' '
+	test_create_repo checkout &&
+	(
+		test_commit checkout &&
+
+		fill a b c d e >content &&
+		git add content &&
+		git commit -m initial &&
+
+		git checkout -b simple master &&
+		fill a c e >content &&
+		git commit -a -m simple &&
+
+		fill b d >content &&
+		git checkout --merge master &&
+		! grep -E "\|+" content &&
+
+		git config merge.conflictstyle merge &&
+
+		git checkout -f simple &&
+		fill b d >content &&
+		git checkout --merge --conflict=diff3 master &&
+		grep -E "\|+" content &&
+
+		git checkout -f simple &&
+		fill b d >content &&
+		git checkout --merge --conflict=merge master &&
+		! grep -E "\|+" content
+	)
+'
+
 test_done
