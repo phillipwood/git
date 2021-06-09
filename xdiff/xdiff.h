@@ -64,6 +64,7 @@ extern "C" {
 #define XDL_MERGE_FAVOR_UNION 3
 
 /* merge output styles */
+#define XDL_MERGE_STYLE_MERGE 0
 #define XDL_MERGE_STYLE_DIFF3 1
 
 typedef struct s_mmfile {

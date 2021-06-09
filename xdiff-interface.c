@@ -299,7 +299,7 @@ int xdiff_compare_lines(const char *l1, long s1,
 	return xdl_recmatch(l1, s1, l2, s2, flags);
 }
 
-int git_xmerge_style = -1;
+int git_xmerge_style = XDL_MERGE_STYLE_MERGE;
 
 int git_xmerge_config(const char *var, const char *value, void *cb)
 {
@@ -309,7 +309,7 @@ int git_xmerge_config(const char *var, const char *value, void *cb)
 		if (!strcmp(value, "diff3"))
 			git_xmerge_style = XDL_MERGE_STYLE_DIFF3;
 		else if (!strcmp(value, "merge"))
-			git_xmerge_style = 0;
+			git_xmerge_style = XDL_MERGE_STYLE_MERGE;
 		/*
 		 * Please update _git_checkout() in
 		 * git-completion.bash when you add new merge config

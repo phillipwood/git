@@ -55,8 +55,7 @@ int cmd_merge_file(int argc, const char **argv, const char *prefix)
 	if (startup_info->have_repository) {
 		/* Read the configuration file */
 		git_config(git_xmerge_config, NULL);
-		if (0 <= git_xmerge_style)
-			xmp.style = git_xmerge_style;
+		xmp.style = git_xmerge_style;
 	}
 
 	argc = parse_options(argc, argv, prefix, options, merge_file_usage, 0);
