@@ -41,4 +41,25 @@ test_expect_success 'merge' '
 	)
 '
 
+test_expect_success 'merge-tree' '
+	test_create_repo merge-tree &&
+	(
+		cd merge-tree &&
+
+		test_commit initial initial-file initial &&
+		test_commit r content r &&
+		git reset --hard initial &&
+		test_commit l content l &&
+
+		git merge-tree initial r l >actual &&
+		! grep -E "\|+" actual &&
+
+		git -c merge.conflictstyle=diff3 merge-tree initial r l >actual &&
+		grep -E "\|+" actual &&
+
+		git -c merge.conflictstyle=merge merge-tree initial r l >actual &&
+		! grep -E "\|+" actual
+	)
+'
+
 test_done
