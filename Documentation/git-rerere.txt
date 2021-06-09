@@ -159,7 +159,7 @@ resolve.
 
 Running the 'git rerere' command immediately after a conflicted
 automerge records the conflicted working tree files, with the
-usual conflict markers `<<<<<<<`, `=======`, and `>>>>>>>` in
+usual conflict markers `<<<<<<<`, `|||||||`, `=======`, and `>>>>>>>` in
 them.  Later, after you are done resolving the conflicts,
 running 'git rerere' again will record the resolved state of these
 files.  Suppose you did this when you created the test merge of

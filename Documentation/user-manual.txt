@@ -1243,6 +1243,8 @@ files with conflicts will have conflict markers added, like this:
 -------------------------------------------------
 <<<<<<< HEAD:file.txt
 Hello world
+|||||||
+Original
 =======
 Goodbye
 >>>>>>> 77976da35a11db4580b80ae27e8d65caf5208086:file.txt
@@ -1276,9 +1278,11 @@ diff --cc file.txt
 index 802992c,2b60207..0000000
 --- a/file.txt
 +++ b/file.txt
-@@@ -1,1 -1,1 +1,5 @@@
+@@@ -1,1 -1,1 +1,7 @@@
 ++<<<<<<< HEAD:file.txt
  +Hello world
+++|||||||
+++Original
 ++=======
 + Goodbye
 ++>>>>>>> 77976da35a11db4580b80ae27e8d65caf5208086:file.txt

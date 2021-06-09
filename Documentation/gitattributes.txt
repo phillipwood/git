@@ -1042,10 +1042,10 @@ text::
 
 	Usual 3-way file level merge for text files.  Conflicted
 	regions are marked with conflict markers `<<<<<<<`,
-	`=======` and `>>>>>>>`.  The version from your branch
-	appears before the `=======` marker, and the version
+	`|||||||`, `=======` and `>>>>>>>`.  The version from your branch
+	appears before the `|||||||` marker, and the version
 	from the merged branch appears after the `=======`
-	marker.
+	marker. In-between is the original.
 
 binary::
 

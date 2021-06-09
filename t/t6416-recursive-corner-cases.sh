@@ -8,6 +8,8 @@ export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 . ./test-lib.sh
 . "$TEST_DIRECTORY"/lib-merge.sh
 
+git config --global merge.conflictstyle merge # TODO: use the default
+
 #
 #  L1  L2
 #   o---o

@@ -6,6 +6,8 @@
 test_description='git merge-tree'
 . ./test-lib.sh
 
+git config merge.conflictstyle merge # TODO: use the default
+
 test_expect_success setup '
 	test_commit "initial" "initial-file" "initial"
 '

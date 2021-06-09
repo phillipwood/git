@@ -17,6 +17,8 @@ export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
 . ./test-lib.sh
 
+git config merge.conflictstyle merge # TODO: use the default
+
 test_have_prereq SED_STRIPS_CR && SED_OPTIONS=-b
 
 compare_files () {

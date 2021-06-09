@@ -7,6 +7,8 @@ export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
 . ./test-lib.sh
 
+git config merge.conflictstyle merge # TODO: use the default
+
 test_expect_success 'setup' '
 	echo "1 " >a &&
 	git add . &&

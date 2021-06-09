@@ -7,6 +7,8 @@ test_description='Test notes merging with manual conflict resolution'
 
 . ./test-lib.sh
 
+git config --global merge.conflictstyle merge # TODO: use the default
+
 # Set up a notes merge scenario with different kinds of conflicts
 test_expect_success 'setup commits' '
 	test_commit 1st &&

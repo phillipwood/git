@@ -29,7 +29,7 @@ test_expect_success 'merge' '
 		git commit -a -m left &&
 
 		test_must_fail git merge r &&
-		! grep -E "\|+" content &&
+		grep -E "\|+" content &&
 
 		git reset --hard &&
 		test_must_fail git -c merge.conflictstyle=diff3 merge r &&
@@ -52,7 +52,7 @@ test_expect_success 'merge-tree' '
 		test_commit l content l &&
 
 		git merge-tree initial r l >actual &&
-		! grep -E "\|+" actual &&
+		grep -E "\|+" actual &&
 
 		git -c merge.conflictstyle=diff3 merge-tree initial r l >actual &&
 		grep -E "\|+" actual &&
@@ -77,7 +77,7 @@ test_expect_success 'notes' '
 		git notes add -f -m l initial &&
 
 		test_must_fail git notes merge r &&
-		! grep -E "\|+" .git/NOTES_MERGE_WORKTREE/* &&
+		grep -E "\|+" .git/NOTES_MERGE_WORKTREE/* &&
 
 		git notes merge --abort &&
 		test_must_fail git -c merge.conflictstyle=diff3 notes merge r &&
@@ -104,7 +104,7 @@ test_expect_success 'checkout' '
 
 		fill b d >content &&
 		git checkout --merge master &&
-		! grep -E "\|+" content &&
+		grep -E "\|+" content &&
 
 		git config merge.conflictstyle merge &&
 

@@ -9,6 +9,8 @@ export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 . ./test-lib.sh
 . "$TEST_DIRECTORY"/lib-merge.sh
 
+git config --global merge.conflictstyle merge # TODO: use the default
+
 test_setup_rename_delete_untracked () {
 	test_create_repo rename-delete-untracked &&
 	(

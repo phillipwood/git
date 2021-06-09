@@ -32,6 +32,8 @@ export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
 . "$TEST_DIRECTORY"/lib-rebase.sh
 
+git config merge.conflictstyle merge # TODO: use the default
+
 test_expect_success 'setup' '
 	git switch -C primary &&
 	test_commit A file1 &&

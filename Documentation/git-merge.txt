@@ -233,7 +233,7 @@ final result verbatim.  When both sides made changes to the same area,
 however, Git cannot randomly pick one side over the other, and asks you to
 resolve it by leaving what both sides did to that area.
 
-By default, Git uses the same style as the one used by the "merge" program
+By default, Git uses a similar style to the one used by the "merge" program
 from the RCS suite to present such a conflicted hunk, like this:
 
 ------------
@@ -242,6 +242,8 @@ ancestor, or cleanly resolved because only one side changed.
 <<<<<<< yours:sample.txt
 Conflict resolution is hard;
 let's go shopping.
+|||||||
+Originally there's no conflict.
 =======
 Git makes conflict resolution easy.
 >>>>>>> theirs:sample.txt
@@ -249,17 +251,12 @@ And here is another line that is cleanly resolved or unmodified.
 ------------
 
 The area where a pair of conflicting changes happened is marked with markers
-`<<<<<<<`, `=======`, and `>>>>>>>`.  The part before the `=======`
-is typically your side, and the part afterwards is typically their side.
+`<<<<<<<`, `=======`, and `>>>>>>>`.  The part before the `|||||||`
+is typically your side, and the part after `=======` is typically their side.
+In-between is the original code.
 
-The default format does not show what the original said in the conflicting
-area.  You cannot tell how many lines are deleted and replaced with
-Barbie's remark on your side.  The only thing you can tell is that your
-side wants to say it is hard and you'd prefer to go shopping, while the
-other side wants to claim it is easy.
-
-An alternative style can be used by setting the "merge.conflictStyle"
-configuration variable to "diff3".  In "diff3" style, the above conflict
+An more basic style can be used by setting the "merge.conflictStyle"
+configuration variable to "merge".  In "merge" style, the above conflict
 may look like this:
 
 ------------
@@ -268,20 +265,11 @@ ancestor, or cleanly resolved because only one side changed.
 <<<<<<< yours:sample.txt
 Conflict resolution is hard;
 let's go shopping.
-|||||||
-Conflict resolution is hard.
 =======
 Git makes conflict resolution easy.
 >>>>>>> theirs:sample.txt
 And here is another line that is cleanly resolved or unmodified.
 ------------
-
-In addition to the `<<<<<<<`, `=======`, and `>>>>>>>` markers, it uses
-another `|||||||` marker that is followed by the original text.  You can
-tell that the original just stated a fact, and your side simply gave in to
-that statement and gave up, while the other side tried to have a more
-positive attitude.  You can sometimes come up with a better resolution by
-viewing the original.
 
 
 HOW TO RESOLVE CONFLICTS

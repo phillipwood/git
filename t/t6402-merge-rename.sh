@@ -270,6 +270,7 @@ test_expect_success 'setup for rename + d/f conflicts' '
 	git checkout --orphan dir-in-way &&
 	git rm -rf . &&
 	git clean -fdqx &&
+	git config merge.conflictstyle merge && # TODO: use the default
 
 	mkdir sub &&
 	mkdir dir &&
@@ -871,6 +872,7 @@ test_expect_success 'setup for use of extended merge markers' '
 	git clean -fdqx &&
 	rm -rf .git &&
 	git init &&
+	git config merge.conflictstyle merge && # TODO: use the default
 
 	printf "1\n2\n3\n4\n5\n6\n7\n8\n" >original_file &&
 	git add original_file &&

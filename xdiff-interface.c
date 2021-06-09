@@ -299,7 +299,7 @@ int xdiff_compare_lines(const char *l1, long s1,
 	return xdl_recmatch(l1, s1, l2, s2, flags);
 }
 
-int git_xmerge_style = XDL_MERGE_STYLE_MERGE;
+int git_xmerge_style = XDL_MERGE_STYLE_DIFF3;
 
 int git_xmerge_config(const char *var, const char *value, void *cb)
 {

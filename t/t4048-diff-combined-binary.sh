@@ -6,6 +6,8 @@ export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
 . ./test-lib.sh
 
+git config merge.conflictstyle merge # TODO: use the default
+
 test_expect_success 'setup binary merge conflict' '
 	echo oneQ1 | q_to_nul >binary &&
 	git add binary &&

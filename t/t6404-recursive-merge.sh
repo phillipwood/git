@@ -6,6 +6,8 @@ export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
 . ./test-lib.sh
 
+git config merge.conflictstyle merge # TODO: use the default
+
 # This scenario is based on a real-world repository of Shawn Pearce.
 
 # 1 - A - D - F

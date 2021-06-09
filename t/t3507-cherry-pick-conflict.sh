@@ -281,6 +281,7 @@ test_expect_success \
 
 test_expect_success 'failed cherry-pick describes conflict in work tree' '
 	pristine_detach initial &&
+	git config merge.conflictstyle merge && # TODO: use the default
 	cat <<-EOF >expected &&
 	<<<<<<< HEAD
 	a
@@ -316,6 +317,7 @@ test_expect_success 'diff3 -m style' '
 
 test_expect_success 'revert also handles conflicts sanely' '
 	git config --unset merge.conflictstyle &&
+	git config merge.conflictstyle merge && # TODO: use the default
 	pristine_detach initial &&
 	cat <<-EOF >expected &&
 	<<<<<<< HEAD

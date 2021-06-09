@@ -3,6 +3,8 @@
 test_description='RCS merge replacement: merge-file'
 . ./test-lib.sh
 
+git config merge.conflictstyle merge # TODO: use the default
+
 test_expect_success 'setup' '
 	cat >orig.txt <<-\EOF &&
 	Dominus regit me,

@@ -28,6 +28,7 @@ test_description="recursive merge with directory renames"
 . ./test-lib.sh
 . "$TEST_DIRECTORY"/lib-merge.sh
 
+git config --global merge.conflictstyle merge # TODO: use the default
 
 ###########################################################################
 # SECTION 1: Basic cases we should be able to handle

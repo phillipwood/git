@@ -30,6 +30,8 @@ normally outputs a warning and brackets the conflict with lines containing
 
 	<<<<<<< A
 	lines in file A
+	|||||||
+	lines in merge base
 	=======
 	lines in file B
 	>>>>>>> B

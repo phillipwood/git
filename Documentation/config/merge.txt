@@ -1,10 +1,10 @@
 merge.conflictStyle::
-	Specify the style in which conflicted hunks are written out to
-	working tree files upon merge.  The default is "merge", which
-	shows a `<<<<<<<` conflict marker, changes made by one side,
-	a `=======` marker, changes made by the other side, and then
-	a `>>>>>>>` marker.  An alternate style, "diff3", adds a `|||||||`
-	marker and the original text before the `=======` marker.
+	Specify the style in which conflicted hunks are written out to working
+	tree files upon merge. The default is "diff3", which shows a `<<<<<<<`
+	conflict marker, changes made by one side, a `|||||||` marker, the
+	original text, a `=======` marker, changes made by the other side, and
+	then a `>>>>>>>` marker. A simpler mode "merge" omits the `|||||||`
+	marker and the original text.
 
 merge.defaultToUpstream::
 	If merge is called without any commit argument, merge the upstream

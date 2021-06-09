@@ -7,6 +7,8 @@ test_description='Test notes merging at various fanout levels'
 
 . ./test-lib.sh
 
+git config merge.conflictstyle merge # TODO: use the default
+
 verify_notes () {
 	notes_ref="$1"
 	commit="$2"

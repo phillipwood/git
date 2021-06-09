@@ -25,6 +25,7 @@ test_description="merge cases"
 . ./test-lib.sh
 . "$TEST_DIRECTORY"/lib-merge.sh
 
+git config --global merge.conflictstyle merge # TODO: use the default
 
 # Testcase basic, conflicting changes in 'numerals'
 

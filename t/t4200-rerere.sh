@@ -27,6 +27,8 @@ export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
 . ./test-lib.sh
 
+git config merge.conflictstyle merge # TODO: use the default
+
 test_expect_success 'setup' '
 	cat >a1 <<-\EOF &&
 	Some title

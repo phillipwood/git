@@ -253,6 +253,7 @@ test_expect_success 'status with merge conflict in .gitmodules' '
 	test_create_repo_with_commit sub2 &&
 	(
 		cd super &&
+		git config merge.conflictstyle merge && # TODO: use the default
 		prev=$(git rev-parse HEAD) &&
 		git checkout -b add_sub1 &&
 		git submodule add ../sub1 &&
