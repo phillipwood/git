@@ -3845,7 +3845,10 @@ static void merge_recursive_config(struct merge_options *opt)
 		} /* avoid erroring on values from future versions of git */
 		free(value);
 	}
-	git_config(git_xmerge_config, NULL);
+	if (git_xmerge_style < 0)
+		git_config(git_xmerge_config, NULL);
+	else
+		git_config(git_default_config, NULL);
 }
 
 void init_merge_options(struct merge_options *opt,
