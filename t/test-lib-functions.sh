@@ -334,21 +334,24 @@ test_commit () {
 	then
 		test_tick
 	fi &&
-	git ${indir:+ -C "$indir"} commit \
+	GIT_TEST_DATE_NOW=$test_tick \
+	    git ${indir:+ -C "$indir"} commit \
 	    ${author:+ --author "$author"} \
 	    $signoff -m "$1" &&
 	case "$tag" in
 	none)
 		;;
 	light)
-		git ${indir:+ -C "$indir"} tag "${4:-$1}"
+		GIT_TEST_DATE_NOW=$test_tick \
+			git ${indir:+ -C "$indir"} tag "${4:-$1}"
 		;;
 	annotate)
 		if test -z "$notick"
 		then
 			test_tick
 		fi &&
-		git ${indir:+ -C "$indir"} tag -a -m "$1" "${4:-$1}"
+		GIT_TEST_DATE_NOW=$test_tick \
+			git ${indir:+ -C "$indir"} tag -a -m "$1" "${4:-$1}"
 		;;
 	esac
 }

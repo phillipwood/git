@@ -51,7 +51,7 @@ test_expect_success 'override reflog default format' '
 '
 
 cat >expect <<'EOF'
-Reflog: HEAD@{Thu Apr 7 15:13:13 2005 -0700} (C O Mitter <committer@example.com>)
+Reflog: HEAD@{Thu Apr 7 22:13:13 2005 +0000} (C O Mitter <committer@example.com>)
 Reflog message: commit (initial): one
 EOF
 test_expect_success 'using @{now} syntax shows reflog date (multiline)' '
@@ -61,7 +61,7 @@ test_expect_success 'using @{now} syntax shows reflog date (multiline)' '
 '
 
 cat >expect <<EOF
-$commit HEAD@{Thu Apr 7 15:13:13 2005 -0700}: commit (initial): one
+$commit HEAD@{Thu Apr 7 22:13:13 2005 +0000}: commit (initial): one
 EOF
 test_expect_success 'using @{now} syntax shows reflog date (oneline)' '
 	git log -g -1 --oneline HEAD@{now} >actual &&
@@ -69,7 +69,7 @@ test_expect_success 'using @{now} syntax shows reflog date (oneline)' '
 '
 
 cat >expect <<'EOF'
-HEAD@{Thu Apr 7 15:13:13 2005 -0700}
+HEAD@{Thu Apr 7 22:13:13 2005 +0000}
 EOF
 test_expect_success 'using @{now} syntax shows reflog date (format=%gd)' '
 	git log -g -1 --format=%gd HEAD@{now} >actual &&
@@ -77,7 +77,7 @@ test_expect_success 'using @{now} syntax shows reflog date (format=%gd)' '
 '
 
 cat >expect <<'EOF'
-Reflog: HEAD@{Thu Apr 7 15:13:13 2005 -0700} (C O Mitter <committer@example.com>)
+Reflog: HEAD@{Thu Apr 7 22:13:13 2005 +0000} (C O Mitter <committer@example.com>)
 Reflog message: commit (initial): one
 EOF
 test_expect_success 'using --date= shows reflog date (multiline)' '
@@ -87,7 +87,7 @@ test_expect_success 'using --date= shows reflog date (multiline)' '
 '
 
 cat >expect <<EOF
-$commit HEAD@{Thu Apr 7 15:13:13 2005 -0700}: commit (initial): one
+$commit HEAD@{Thu Apr 7 22:13:13 2005 +0000}: commit (initial): one
 EOF
 test_expect_success 'using --date= shows reflog date (oneline)' '
 	git log -g -1 --oneline --date=default >actual &&
@@ -95,7 +95,7 @@ test_expect_success 'using --date= shows reflog date (oneline)' '
 '
 
 cat >expect <<'EOF'
-HEAD@{1112911993 -0700}
+HEAD@{1112911993 +0000}
 EOF
 test_expect_success 'using --date= shows reflog date (format=%gd)' '
 	git log -g -1 --format=%gd --date=raw >actual &&

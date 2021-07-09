@@ -1750,7 +1750,10 @@ static int files_log_ref_write(struct files_ref_store *refs,
 	if (logfd < 0)
 		return 0;
 	result = log_ref_write_fd(logfd, old_oid, new_oid,
-				  git_committer_info(0), msg);
+				  fmt_ident(getenv("GIT_COMMITTER_NAME"),
+					    getenv("GIT_COMMITTER_EMAIL"),
+					    WANT_COMMITTER_IDENT, NULL, 0),
+				  msg);
 	if (result) {
 		struct strbuf sb = STRBUF_INIT;
 		int save_errno = errno;

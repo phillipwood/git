@@ -4,6 +4,10 @@
 #
 
 test_description='Test git update-ref and basic ref logging'
+
+GIT_TEST_DATE_NOW=1025843494
+export GIT_TEST_DATE_NOW
+
 . ./test-lib.sh
 
 Z=$ZERO_OID
@@ -20,6 +24,7 @@ create_test_commits ()
 	for name in A B C D E F
 	do
 		test_tick &&
+		GIT_TEST_DATE_NOW=$(($GIT_TEST_DATE_NOW + 60))
 		T=$(git write-tree) &&
 		sha1=$(echo $name | git commit-tree $T) &&
 		eval $prfx$name=$sha1
@@ -268,19 +273,19 @@ test_expect_success "(not) changed .git/$m" '
 rm -f .git/logs/refs/heads/main
 test_expect_success "create $m (logged by touch)" '
 	test_config core.logAllRefUpdates false &&
-	GIT_COMMITTER_DATE="2005-05-26 23:30" \
+	GIT_TEST_DATE_NOW=1117150200 \
 	git update-ref --create-reflog HEAD $A -m "Initial Creation" &&
 	test $A = $(git show-ref -s --verify $m)
 '
 test_expect_success "update $m (logged by touch)" '
 	test_config core.logAllRefUpdates false &&
-	GIT_COMMITTER_DATE="2005-05-26 23:31" \
+	GIT_TEST_DATE_NOW=1117150260 \
 	git update-ref HEAD $B $A -m "Switch" &&
 	test $B = $(git show-ref -s --verify $m)
 '
 test_expect_success "set $m (logged by touch)" '
 	test_config core.logAllRefUpdates false &&
-	GIT_COMMITTER_DATE="2005-05-26 23:41" \
+	GIT_TEST_DATE_NOW=1117150860 \
 	git update-ref HEAD $A &&
 	test $A = $(git show-ref -s --verify $m)
 '
@@ -325,19 +330,19 @@ test_expect_success "verifying $m's log (logged by touch)" '
 
 test_expect_success "create $m (logged by config)" '
 	test_config core.logAllRefUpdates true &&
-	GIT_COMMITTER_DATE="2005-05-26 23:32" \
+	GIT_TEST_DATE_NOW=1117150320 \
 	git update-ref HEAD $A -m "Initial Creation" &&
 	test $A = $(git show-ref -s --verify $m)
 '
 test_expect_success "update $m (logged by config)" '
 	test_config core.logAllRefUpdates true &&
-	GIT_COMMITTER_DATE="2005-05-26 23:33" \
+	GIT_TEST_DATE_NOW=1117150380 \
 	git update-ref HEAD $B $A -m "Switch" &&
 	test $B = $(git show-ref -s --verify $m)
 '
 test_expect_success "set $m (logged by config)" '
 	test_config core.logAllRefUpdates true &&
-	GIT_COMMITTER_DATE="2005-05-26 23:43" \
+	GIT_TEST_DATE_NOW=1117150980 \
 	git update-ref HEAD $A &&
 	test $A = $(git show-ref -s --verify $m)
 '
@@ -438,24 +443,24 @@ rm -f .git/$m .git/logs/$m expect
 
 test_expect_success 'creating initial files' '
 	test_when_finished rm -f M &&
+	test_tick &&
 	echo TEST >F &&
 	git add F &&
-	GIT_AUTHOR_DATE="2005-05-26 23:30" \
-	GIT_COMMITTER_DATE="2005-05-26 23:30" git commit -m add -a &&
+	GIT_TEST_DATE_NOW=1117150200 git commit -m add -a &&
+	test_tick &&
 	h_TEST=$(git rev-parse --verify HEAD) &&
 	echo The other day this did not work. >M &&
 	echo And then Bob told me how to fix it. >>M &&
 	echo OTHER >F &&
-	GIT_AUTHOR_DATE="2005-05-26 23:41" \
-	GIT_COMMITTER_DATE="2005-05-26 23:41" git commit -F M -a &&
+	GIT_TEST_DATE_NOW=1117150860 git commit -F M -a &&
+	test_tick &&
 	h_OTHER=$(git rev-parse --verify HEAD) &&
-	GIT_AUTHOR_DATE="2005-05-26 23:44" \
-	GIT_COMMITTER_DATE="2005-05-26 23:44" git commit --amend &&
+	GIT_TEST_DATE_NOW=1117151040 git commit --amend &&
+	test_tick &&
 	h_FIXED=$(git rev-parse --verify HEAD) &&
 	echo Merged initial commit and a later commit. >M &&
 	echo $h_TEST >.git/MERGE_HEAD &&
-	GIT_AUTHOR_DATE="2005-05-26 23:45" \
-	GIT_COMMITTER_DATE="2005-05-26 23:45" git commit -F M &&
+	GIT_TEST_DATE_NOW=1117151100 git commit -F M &&
 	h_MERGED=$(git rev-parse --verify HEAD)
 '
 
