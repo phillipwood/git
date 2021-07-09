@@ -1000,16 +1000,12 @@ void date_mode_release(struct date_mode *mode)
 
 void datestamp(struct strbuf *out)
 {
-	time_t now;
+	struct timeval now;
 	int offset;
-	struct tm tm = { 0 };
 
-	time(&now);
-
-	offset = tm_to_time_t(localtime_r(&now, &tm)) - now;
-	offset /= 60;
-
-	date_string(now, offset, out);
+	get_time(&now);
+	offset = local_tzoffset(now.tv_sec);
+	date_string(now.tv_sec, offset, out);
 }
 
 /*
