@@ -958,6 +958,21 @@ static int format_reflog_person(struct strbuf *sb,
 	return format_person_part(sb, part, ident, strlen(ident), dmode);
 }
 
+static int format_reflog_date(struct strbuf *sb,
+			      struct reflog_walk_info *log)
+{
+	timestamp_t t;
+
+	if (!log)
+		return 2;
+
+	t = get_reflog_timestamp(log);
+	if (t)
+		strbuf_addstr(sb, show_date(t, 0, DATE_MODE(UNIX)));
+
+	return 2;
+}
+
 static size_t parse_color(struct strbuf *sb, /* in UTF-8 */
 			  const char *placeholder,
 			  struct format_commit_context *c)
@@ -1417,6 +1432,9 @@ static size_t format_commit_one(struct strbuf *sb, /* in UTF-8 */
 						    placeholder[1],
 						    c->pretty_ctx->reflog_info,
 						    &c->pretty_ctx->date_mode);
+		case 't':
+			return format_reflog_date(sb,
+						  c->pretty_ctx->reflog_info);
 		}
 		return 0;	/* unknown %g placeholder */
 	case 'N':
