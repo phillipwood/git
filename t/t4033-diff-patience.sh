@@ -17,4 +17,46 @@ test_diff_frobnitz "patience"
 
 test_diff_unique "patience"
 
+test_expect_success 'non unique context between deletion and addition' '
+	test_write_lines a b a b c d c d >file &&
+	git add file &&
+	test_write_lines a b c d e c d >file &&
+	git diff --diff-algorithm=patience file >actual &&
+	sed -ne "/^@@/,\$p" actual >hunk &&
+	cat >expect <<-\EOF &&
+	@@ -1,8 +1,7 @@
+	 a
+	 b
+	-a
+	-b
+	 c
+	 d
+	+e
+	 c
+	 d
+	EOF
+	test_cmp expect hunk
+'
+
+test_expect_success 'non unique context between additon and deletion' '
+	test_write_lines a b a b c d c d >file &&
+	git add file &&
+	test_write_lines a b e a b c d >file &&
+	git diff --diff-algorithm=patience file >actual &&
+	sed -ne "/^@@/,\$p" actual >hunk &&
+	cat >expect <<-\EOF &&
+	@@ -1,8 +1,7 @@
+	 a
+	 b
+	+e
+	 a
+	 b
+	 c
+	 d
+	-c
+	-d
+	EOF
+	test_cmp expect hunk
+'
+
 test_done

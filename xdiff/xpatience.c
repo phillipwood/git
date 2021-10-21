@@ -21,6 +21,7 @@
  */
 
 #include "xinclude.h"
+#include "xtypes.h"
 
 /*
  * The basic idea of patience diff is to find lines that are unique in
@@ -300,16 +301,14 @@ static int walk_common_sequence(struct hashmap *map, struct entry *first,
 	}
 }
 
-static int fall_back_to_classic_diff(struct hashmap *map,
-		int line1, int count1, int line2, int count2)
+static bool regions_match(xrecord_t *a, xrecord_t *b, int count)
 {
-	xpparam_t xpp;
+	for (int i = 0; i < count; i++) {
+		if (a[i].minimal_perfect_hash != b[i].minimal_perfect_hash)
+			return false;
+	}
 
-	memset(&xpp, 0, sizeof(xpp));
-	xpp.flags = map->xpp->flags & ~XDF_DIFF_ALGORITHM_MASK;
-
-	return xdl_fall_back_diff(map->env, &xpp,
-				  line1, count1, line2, count2);
+	return true;
 }
 
 /*
@@ -354,12 +353,71 @@ static int patience_diff(xpparam_t const *xpp, xdfenv_t *env,
 	result = find_longest_common_sequence(&map, &first);
 	if (result)
 		goto out;
-	if (first)
+	if (first) {
 		result = walk_common_sequence(&map, first,
 			line1, count1, line2, count2);
-	else
-		result = fall_back_to_classic_diff(&map,
-			line1, count1, line2, count2);
+	} else {
+		xrecord_t *rec1 = env->xdf1.recs, *rec2 = env->xdf2.recs;
+		long i1 = line1 - 2, i2 = line2 - 2;
+		long overlap1, overlap2;
+
+		/* Find trailing context */
+		while (count1 && count2 &&
+		       rec1[i1 + count1].minimal_perfect_hash == rec2[i2 + count2].minimal_perfect_hash) {
+			count1--;
+			count2--;
+		}
+		/* Find leading context */
+		while (count1 && count2 &&
+		       rec1[line1 - 1].minimal_perfect_hash == rec2[line2 - 1].minimal_perfect_hash) {
+			count1--;
+			count2--;
+			line1++;
+			line2++;
+		}
+		/*
+		 * Find inter-hunk context. First see any of the
+		 * trailing deletions match leading additions, then
+		 * check to see if any trailing additions match leading
+		 * deletions and take the longest overlap.
+		 */
+		overlap1 = count1 > count2 ? count2 : count1;
+		if (overlap1)
+			overlap1--;
+		i1 = line1 + (count1 - overlap1) - 1;
+		i2 = line2 - 1;
+		while (overlap1) {
+			if (regions_match(&rec1[i1], &rec2[i2], overlap1))
+			    break;
+			overlap1--;
+			i1++;
+		}
+		overlap2 = count1 > count2 ? count2 : count1;
+		if (overlap2)
+			overlap2--;
+		i1 = line1 - 1;
+		i2 = line2 + (count2 - overlap2) - 1;
+		while (overlap2) {
+			if (regions_match(&rec1[i1], &rec2[i2], overlap2))
+			    break;
+			overlap2--;
+			i2++;
+		}
+		if (overlap1 > overlap2) {
+			count1 -= overlap1;
+			count2 -= overlap1;
+			line2 += overlap1;
+		} else {
+			count1 -= overlap2;
+			line1 += overlap2;
+			count2 -= overlap2;
+		}
+
+		while (count1--)
+			env->xdf1.changed[line1++ - 1] = true;
+		while (count2--)
+			env->xdf2.changed[line2++ - 1] = true;
+	}
  out:
 	xdl_free(map.entries);
 	return result;
