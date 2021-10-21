@@ -302,18 +302,6 @@ static int walk_common_sequence(struct hashmap *map, struct entry *first,
 	}
 }
 
-static int fall_back_to_classic_diff(struct hashmap *map,
-		int line1, int count1, int line2, int count2)
-{
-	xpparam_t xpp;
-
-	memset(&xpp, 0, sizeof(xpp));
-	xpp.flags = map->xpp->flags & ~XDF_DIFF_ALGORITHM_MASK;
-
-	return xdl_fall_back_diff(map->env, &xpp,
-				  line1, count1, line2, count2);
-}
-
 /*
  * Recursively find the longest common sequence of unique lines,
  * and if none was found, ask xdl_do_diff() to do the job.
@@ -356,12 +344,39 @@ static int patience_diff(xpparam_t const *xpp, xdfenv_t *env,
 	result = find_longest_common_sequence(&map, &first);
 	if (result)
 		goto out;
-	if (first)
+	if (first) {
 		result = walk_common_sequence(&map, first,
 			line1, count1, line2, count2);
-	else
-		result = fall_back_to_classic_diff(&map,
-			line1, count1, line2, count2);
+	} else {
+		xrecord_t **rec1 = env->xdf1.recs, **rec2 = env->xdf2.recs;
+		long i1 = line1 - 2, i2 = line2 - 2;
+
+		/* Find trailing context */
+		while (count1 && count2 &&
+		       rec1[i1 + count1]->ha == rec2[i2 + count2]->ha) {
+			count1--;
+			count2--;
+		}
+		/* Find leading context */
+		while (count1 && count2 &&
+		       rec1[line1 - 1]->ha == rec2[line2 - 1]->ha) {
+			count1--;
+			count2--;
+			line1++;
+			line2++;
+		}
+		/* Find inter-hunk context */
+		while (count1 && count2 &&
+		       rec1[i1 + count1]->ha == rec2[line2 - 1]->ha) {
+			count1--;
+			count2--;
+			line2++;
+		}
+		while (count1--)
+			env->xdf1.rchg[line1++ - 1] = 1;
+		while (count2--)
+			env->xdf2.rchg[line2++ - 1] = 1;
+	}
  out:
 	xdl_free(map.entries);
 	return result;
