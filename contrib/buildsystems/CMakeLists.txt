@@ -54,7 +54,7 @@ set(CMAKE_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/../..)
 
 option(USE_VCPKG "Whether or not to use vcpkg for obtaining dependencies.  Only applicable to Windows platforms" ON)
 if(NOT WIN32)
-	set(USE_VCPKG OFF CACHE BOOL FORCE)
+	set(USE_VCPKG OFF CACHE BOOL "Not applicable to non-windows platforms" FORCE)
 endif()
 
 if(NOT DEFINED CMAKE_EXPORT_COMPILE_COMMANDS)
