@@ -108,7 +108,6 @@ project(git
 
 #TODO gitk git-gui gitweb
 #TODO Enable NLS on windows natively
-#TODO Add pcre support
 
 #macros for parsing the Makefile for sources and scripts
 macro(parse_makefile_for_sources list_var regex)
@@ -155,6 +154,15 @@ find_package(CURL)
 find_package(EXPAT)
 find_package(Iconv)
 
+#Find libpcre2
+find_path(PCRE2_INCLUDE_DIR NAMES "pcre2.h")
+find_library(PCRE2_LIBRARY NAMES "pcre2-8")
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(PCRE2 DEFAULT_MSG PCRE2_LIBRARY PCRE2_INCLUDE_DIR)
+mark_as_advanced(PCRE2_INCLUDE_DIR PCRE2_LIBRARY)
+set(PCRE2_LIBRARIES ${PCRE2_LIBRARY})
+set(PCRE2_INCLUDE_DIRS ${PCRE2_INCLUDE_DIR})
+
 #Don't use libintl on Windows Visual Studio and Clang builds
 if(NOT (WIN32 AND (CMAKE_C_COMPILER_ID STREQUAL "MSVC" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")))
 	find_package(Intl)
@@ -180,7 +188,11 @@ endif()
 if(Intl_FOUND)
 	include_directories(SYSTEM ${Intl_INCLUDE_DIRS})
 endif()
-
+if(PCRE2_FOUND)
+	set(USE_LIBPCRE2 FoundByCMake)
+	add_compile_definitions(USE_LIBPCRE2)
+	include_directories(SYSTEM ${PCRE2_INCLUDE_DIRS})
+endif()
 
 if(WIN32 AND NOT MSVC)#not required for visual studio builds
 	find_program(WINDRES_EXE windres)
@@ -676,6 +688,9 @@ endif()
 if(Iconv_FOUND)
 	target_link_libraries(common-main ${Iconv_LIBRARIES})
 endif()
+if(PCRE2_FOUND)
+	target_link_libraries(common-main ${PCRE2_LIBRARIES})
+endif()
 if(WIN32)
 	target_link_libraries(common-main ws2_32 ntdll ${CMAKE_BINARY_DIR}/git.res)
 	add_dependencies(common-main git-rc)
@@ -969,7 +984,6 @@ set(PYTHON_PATH /usr/bin/python)
 set(TAR tar)
 set(NO_CURL )
 set(NO_EXPAT )
-set(USE_LIBPCRE2 )
 set(NO_PERL )
 set(NO_PTHREADS )
 set(NO_PYTHON )
@@ -1006,6 +1020,7 @@ file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "PYTHON_PATH='${PYTHON_PATH}'\
 file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "TAR='${TAR}'\n")
 file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "NO_CURL='${NO_CURL}'\n")
 file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "NO_EXPAT='${NO_EXPAT}'\n")
+file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "USE_LIBPCRE2='${USE_LIBPCRE2}'\n")
 file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "NO_PERL='${NO_PERL}'\n")
 file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "NO_PTHREADS='${NO_PTHREADS}'\n")
 file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "NO_UNIX_SOCKETS='${NO_UNIX_SOCKETS}'\n")
