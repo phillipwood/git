@@ -757,6 +757,10 @@ add_custom_command(OUTPUT ${git_links} ${git_http_links}
 		DEPENDS git git-remote-http)
 add_custom_target(git-links ALL DEPENDS ${git_links} ${git_http_links})
 
+function(write_script path content)
+	file(WRITE ${path} ${content})
+	file(CHMOD ${path} FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+endfunction()
 
 #creating required scripts
 set(SHELL_PATH /bin/sh)
@@ -783,7 +787,7 @@ foreach(script ${git_shell_scripts})
 	string(REPLACE "@@PERL@@" "${PERL_PATH}" content "${content}")
 	string(REPLACE "@@SANE_TEXT_GREP@@" "-a" content "${content}")
 	string(REPLACE "@@PAGER_ENV@@" "LESS=FRX LV=-c" content "${content}")
-	file(WRITE ${CMAKE_BINARY_DIR}/${script} ${content})
+	write_script(${CMAKE_BINARY_DIR}/${script} "${content}")
 endforeach()
 
 #perl scripts
@@ -798,13 +802,13 @@ foreach(script ${git_perl_scripts})
 	file(STRINGS ${CMAKE_SOURCE_DIR}/${script}.perl content NEWLINE_CONSUME)
 	string(REPLACE "#!/usr/bin/perl" "#!/usr/bin/perl\n${perl_header}\n" content "${content}")
 	string(REPLACE "@@GIT_VERSION@@" "${PROJECT_VERSION}" content "${content}")
-	file(WRITE ${CMAKE_BINARY_DIR}/${script} ${content})
+	write_script(${CMAKE_BINARY_DIR}/${script} "${content}")
 endforeach()
 
 #python script
 file(STRINGS ${CMAKE_SOURCE_DIR}/git-p4.py content NEWLINE_CONSUME)
 string(REPLACE "#!/usr/bin/env python" "#!/usr/bin/python" content "${content}")
-file(WRITE ${CMAKE_BINARY_DIR}/git-p4 ${content})
+write_script(${CMAKE_BINARY_DIR}/git-p4 "${content}")
 
 #perl modules
 file(GLOB_RECURSE perl_modules "${CMAKE_SOURCE_DIR}/perl/*.pm")
@@ -938,20 +942,21 @@ foreach(script ${wrapper_scripts})
 	file(STRINGS ${CMAKE_SOURCE_DIR}/wrap-for-bin.sh content NEWLINE_CONSUME)
 	string(REPLACE "@@BUILD_DIR@@" "${CMAKE_BINARY_DIR}" content "${content}")
 	string(REPLACE "@@PROG@@" "${script}${EXE_EXTENSION}" content "${content}")
-	file(WRITE ${CMAKE_BINARY_DIR}/bin-wrappers/${script} ${content})
+	write_script(${CMAKE_BINARY_DIR}/bin-wrappers/${script} "${content}")
 endforeach()
 
 foreach(script ${wrapper_test_scripts})
 	file(STRINGS ${CMAKE_SOURCE_DIR}/wrap-for-bin.sh content NEWLINE_CONSUME)
 	string(REPLACE "@@BUILD_DIR@@" "${CMAKE_BINARY_DIR}" content "${content}")
 	string(REPLACE "@@PROG@@" "t/helper/${script}${EXE_EXTENSION}" content "${content}")
-	file(WRITE ${CMAKE_BINARY_DIR}/bin-wrappers/${script} ${content})
+	write_script(${CMAKE_BINARY_DIR}/bin-wrappers/${script} "${content}")
 endforeach()
 
 file(STRINGS ${CMAKE_SOURCE_DIR}/wrap-for-bin.sh content NEWLINE_CONSUME)
 string(REPLACE "@@BUILD_DIR@@" "${CMAKE_BINARY_DIR}" content "${content}")
 string(REPLACE "@@PROG@@" "git-cvsserver" content "${content}")
-file(WRITE ${CMAKE_BINARY_DIR}/bin-wrappers/git-cvsserver ${content})
+write_script(${CMAKE_BINARY_DIR}/bin-wrappers/git-cvsserver "${content}")
+
 
 #options for configuring test options
 option(PERL_TESTS "Perform tests that use perl" ON)
