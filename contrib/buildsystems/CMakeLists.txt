@@ -223,6 +223,50 @@ if(CMAKE_C_COMPILER_ID STREQUAL "MSVC")
 	add_compile_options(/MP)
 endif()
 
+#Support developer cflags
+option(DEVELOPER "Use extra warning flags" ON)
+
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
+	if(DEVELOPER)
+	  	# This assumes a recent compiler, we can start
+	  	# checking CMAKE_C_COMPILER_VERSION in future if
+	  	# necessary.
+		string(REPLACE "," ";" DEVOPTS_LIST "${DEVOPTS}")
+		add_compile_options(
+			-Wall
+			-Wextra
+			-Wdeclaration-after-statement
+			-Wformat-security
+			-Wold-style-definition
+			-Woverflow
+			-Wpointer-arith
+			-Wstrict-prototypes
+			-Wunused
+			-Wvla
+			-fno-common
+			-Wmissing-prototypes
+		)
+		if(NOT "no-pedantic" IN_LIST DEVOPTS_LIST)
+			add_compile_options(-Wpedantic)
+		endif()
+		if(NOT "no-error" IN_LIST DEVOPTS_LIST)
+			add_compile_options(-Werror)
+		endif()
+		if(NOT "extra-all" IN_LIST DEVOPTS_LIST)
+			# These are disabled because we have these all over the place.
+			add_compile_options(
+				-Wno-empty-body
+				-Wno-missing-field-initializers
+				-Wno-sign-compare
+				-Wno-unused-parameter
+			)
+		endif()
+		if (WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
+			add_compile_options(-Wno-pedantic-ms-format)
+		endif()
+	endif()
+endif()
+
 #default behaviour
 include_directories(${CMAKE_SOURCE_DIR})
 add_compile_definitions(GIT_HOST_CPU="${CMAKE_SYSTEM_PROCESSOR}")
