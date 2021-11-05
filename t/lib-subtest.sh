@@ -48,7 +48,7 @@ _run_sub_test_lib_test_common () {
 		GIT_SKIP_TESTS=$skip &&
 		export GIT_SKIP_TESTS &&
 		sane_unset GIT_TEST_FAIL_PREREQS &&
-		./"$name.sh" "$@" >out 2>err;
+		./"$name.sh" --build-dir="$GIT_BUILD_DIR" "$@" >out 2>err;
 		ret=$? &&
 		test "$ret" "$cmp_op" "$want_code"
 	)

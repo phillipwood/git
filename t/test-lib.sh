@@ -34,7 +34,12 @@ then
 	# elsewhere
 	TEST_OUTPUT_DIRECTORY=$TEST_DIRECTORY
 fi
-GIT_BUILD_DIR="$TEST_DIRECTORY"/..
+
+# The directory where git was built, normally this is
+# "$TEST_DIRECTORY/.." but the user may specify a build directory on
+# the command line with --build-dir=<dir>. If the user sets
+# GIT_TEST_INSTALLED then GIT_BUILD_DIR is ignored.
+ GIT_BUILD_DIR=
 
 # If we were built with ASAN, it may complain about leaks
 # of program-lifetime variables. Disable it by default to lower
@@ -48,14 +53,6 @@ export ASAN_OPTIONS
 # want to abort so that we notice the problems.
 : ${LSAN_OPTIONS=abort_on_error=1}
 export LSAN_OPTIONS
-
-if test ! -f "$GIT_BUILD_DIR"/GIT-BUILD-OPTIONS
-then
-	echo >&2 'error: GIT-BUILD-OPTIONS missing (has Git been built?).'
-	exit 1
-fi
-. "$GIT_BUILD_DIR"/GIT-BUILD-OPTIONS
-export PERL_PATH SHELL_PATH
 
 # In t0000, we need to override test directories of nested testcases. In case
 # the developer has TEST_OUTPUT_DIRECTORY part of his build options, then we'd
@@ -77,20 +74,6 @@ fi
 # transitory "git init" warning under --verbose.
 : ${GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME:=master}
 export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
-
-################################################################
-# It appears that people try to run tests without building...
-"${GIT_TEST_INSTALLED:-$GIT_BUILD_DIR}/git$X" >/dev/null
-if test $? != 1
-then
-	if test -n "$GIT_TEST_INSTALLED"
-	then
-		echo >&2 "error: there is no working Git at '$GIT_TEST_INSTALLED'"
-	else
-		echo >&2 'error: you do not seem to have built git yet.'
-	fi
-	exit 1
-fi
 
 store_arg_to=
 opt_required_arg=
@@ -137,6 +120,8 @@ parse_option () {
 		with_dashes=t ;;
 	--no-bin-wrappers)
 		no_bin_wrappers=t ;;
+	--build-dir=*)
+		GIT_BUILD_DIR=${opt#--*=} ;;
 	--no-color)
 		color= ;;
 	--va|--val|--valg|--valgr|--valgri|--valgrin|--valgrind)
@@ -255,6 +240,33 @@ then
 	verbose=t
 	trace=t
 	immediate=t
+fi
+
+if test -z "$GIT_BUILD_DIR"
+then
+	GIT_BUILD_DIR="$TEST_DIRECTORY"/..
+fi
+
+if test ! -f "$GIT_BUILD_DIR"/GIT-BUILD-OPTIONS
+then
+	echo >&2 'error: GIT-BUILD-OPTIONS missing (has Git been built?).'
+	exit 1
+fi
+. "$GIT_BUILD_DIR"/GIT-BUILD-OPTIONS
+export PERL_PATH SHELL_PATH
+
+################################################################
+# It appears that people try to run tests without building...
+"${GIT_TEST_INSTALLED:-$GIT_BUILD_DIR}/git$X" >/dev/null
+if test $? != 1
+then
+	if test -n "$GIT_TEST_INSTALLED"
+	then
+		echo >&2 "error: there is no working Git at '$GIT_TEST_INSTALLED'"
+	else
+		echo >&2 'error: you do not seem to have built git yet.'
+	fi
+	exit 1
 fi
 
 TEST_STRESS_JOB_SFX="${GIT_TEST_STRESS_JOB_NR:+.stress-$GIT_TEST_STRESS_JOB_NR}"
