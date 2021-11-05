@@ -265,6 +265,26 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
 			add_compile_options(-Wno-pedantic-ms-format)
 		endif()
 	endif()
+
+	if(SANITIZE)
+		string(REPLACE "," ";" SANITIZE_LIST "${SANITIZE}")
+		add_compile_options(
+			-fsanitize=${SANITIZE}
+			-fno-sanitize-recover=${SANITIZE}
+			-fno-omit-frame-pointer
+		)
+		add_link_options(-fsanitize=${SANITIZE})
+		if("undefined" IN_LIST DEVOPTS_LIST)
+			add_compile_definitions(SHA1DC_FORCE_ALIGNED_ACCESS)
+		endif()
+		if("leak" IN_LIST DEVOPTS_LIST)
+			set(SANITIZE_LEAK YesCompiledWithIt)
+			add_compile_definitions(
+				SUPPRESS_ANNOTATED_LEAKS
+				SANITIZE_LEAK=${SANITIZE_LEAK}
+			)
+		endif()
+	endif()
 endif()
 
 #default behaviour
@@ -1075,6 +1095,7 @@ file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "NO_GETTEXT='${NO_GETTEXT}'\n"
 file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "RUNTIME_PREFIX='${RUNTIME_PREFIX}'\n")
 file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "NO_PYTHON='${NO_PYTHON}'\n")
 file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "SUPPORTS_SIMPLE_IPC='${SUPPORTS_SIMPLE_IPC}'\n")
+file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "SANITIZE_LEAK='${SANITIZE_LEAK}'\n")
 if(USE_VCPKG)
 	file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "PATH=\"$PATH:$TEST_DIRECTORY/../compat/vcbuild/vcpkg/installed/x64-windows/bin\"\n")
 endif()
