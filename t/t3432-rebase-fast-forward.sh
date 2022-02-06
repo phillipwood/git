@@ -96,8 +96,6 @@ test_rebase_same_head success noop same success work same --keep-base
 test_rebase_same_head success noop same success work same --no-fork-point
 test_rebase_same_head success noop same success work same --keep-base --no-fork-point
 test_rebase_same_head success noop same success work same --fork-point main
-test_rebase_same_head success noop same success work diff --fork-point --onto B B
-test_rebase_same_head success noop same success work diff --fork-point --onto B... B
 test_rebase_same_head success noop same success work same --fork-point --onto main... main
 test_rebase_same_head success noop same success work same --keep-base --keep-base main
 
@@ -116,8 +114,6 @@ test_rebase_same_head success noop same success work same --keep-base
 test_rebase_same_head success noop same success work same --no-fork-point
 test_rebase_same_head success noop same success work same --keep-base --no-fork-point
 test_rebase_same_head success noop same success work same --fork-point main
-test_rebase_same_head success noop same success work diff --fork-point --onto B B
-test_rebase_same_head success noop same success work diff --fork-point --onto B... B
 test_rebase_same_head success noop same success work same --fork-point --onto main... main
 test_rebase_same_head success noop same success work same --fork-point --keep-base main
 
@@ -133,8 +129,6 @@ test_rebase_same_head success noop same success work diff --onto B... B
 test_rebase_same_head success noop same success work diff --onto main... main
 test_rebase_same_head success noop same success work diff --keep-base main
 test_rebase_same_head success noop same success work diff --keep-base
-test_rebase_same_head failure work same success work diff --fork-point --onto B B
-test_rebase_same_head failure work same success work diff --fork-point --onto B... B
 test_rebase_same_head success noop same success work diff --fork-point --onto main... main
 test_rebase_same_head success noop same success work diff --fork-point --keep-base main
 
