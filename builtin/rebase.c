@@ -65,6 +65,7 @@ struct rebase_options {
 	const char *state_dir;
 	struct commit *upstream;
 	const char *upstream_name;
+	char *upstream_ref;
 	const char *upstream_arg;
 	char *head_name;
 	struct object_id orig_head;
@@ -971,13 +972,14 @@ static void parse_upstream(struct rebase_options *options,
 {
 	int argc = *argcp;
 	const char **argv = *argvp;
+	struct object_id oid;
+	int nr;
 
 	if (argc < 1) {
 		struct branch *branch;
 
 		branch = branch_get(NULL);
-		options->upstream_name = branch_get_upstream(branch,
-							     NULL);
+		options->upstream_name = branch_get_upstream(branch, NULL);
 		if (!options->upstream_name)
 			error_on_missing_default_upstream();
 		if (options->fork_point < 0)
@@ -989,12 +991,31 @@ static void parse_upstream(struct rebase_options *options,
 		if (!strcmp(options->upstream_name, "-"))
 			options->upstream_name = "@{-1}";
 	}
-	options->upstream =
-		lookup_commit_reference_by_name(options->upstream_name);
+	nr = dwim_ref(options->upstream_name, strlen(options->upstream_name),
+		      &oid, &options->upstream_ref, 0);
+	if (nr == 0) {
+		options->upstream =
+			lookup_commit_reference_by_name(options->upstream_name);
+	} else if (nr < 2 ||
+		   !strcmp(options->upstream_name, options->upstream_ref)) {
+		options->upstream =
+			lookup_commit_reference(the_repository, &oid);
+	} else {
+		free(options->upstream_ref);
+		die(_("ambiguous upstream name: '%s'"), options->upstream_name);
+	}
 	if (!options->upstream)
 		die(_("invalid upstream '%s'"), options->upstream_name);
-	options->upstream_arg = options->upstream_name;
 
+	if (options->fork_point > 0 &&
+	    (!nr || !(starts_with(options->upstream_ref, "refs/heads/") ||
+		      starts_with(options->upstream_ref, "refs/remotes/")))) {
+		warning(_("ignoring --fork-point as '%s' is not a branch"),
+			name);
+		options->fork_point = 0;
+	}
+
+	options->upstream_arg = options->upstream_name;
 	*argcp = argc;
 	*argvp = argv;
 }
@@ -1647,7 +1668,7 @@ int cmd_rebase(int argc, const char **argv, const char *prefix)
 			lookup_commit_reference(the_repository,
 						&options.orig_head);
 		options.restrict_revision =
-			get_fork_point(options.upstream_name, head);
+			get_fork_point(options.upstream_ref, head);
 	}
 
 	if (repo_read_index(the_repository) < 0)
@@ -1808,6 +1829,7 @@ cleanup:
 	strbuf_release(&buf);
 	strbuf_release(&revisions);
 	free(options.head_name);
+	free(options.upstream_ref);
 	free(options.gpg_sign_opt);
 	free(options.cmd);
 	free(options.strategy);

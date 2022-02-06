@@ -193,10 +193,10 @@ test_expect_success 'rebase --merge describes parent of commit being picked' '
 	test_create_repo rebase &&
 	(
 		cd rebase &&
-		test_commit base file &&
-		test_commit main file &&
+		test_commit --no-tag base file &&
+		test_commit --no-tag main file &&
 		git checkout -b side HEAD^ &&
-		test_commit side file &&
+		test_commit --no-tag side file &&
 		test_must_fail git -c merge.conflictstyle=diff3 rebase --merge main &&
 		grep "||||||| parent of" file
 	)

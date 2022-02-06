@@ -32,7 +32,6 @@ test_expect_success 'setup' '
 	rm foo &&
 	test_write_lines "line 1" "        line 2" "line 3" >file &&
 	git commit -am "add file" &&
-	git tag main &&
 
 	mkdir test-bin &&
 	write_script test-bin/git-merge-test <<-\EOF
