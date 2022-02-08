@@ -64,7 +64,7 @@ struct rebase_options {
 	const char *default_backend;
 	const char *state_dir;
 	struct commit *upstream;
-	const char *upstream_name;
+	char *upstream_name;
 	char *upstream_ref;
 	const char *upstream_arg;
 	char *head_name;
@@ -972,6 +972,7 @@ static void parse_upstream(struct rebase_options *options,
 {
 	int argc = *argcp;
 	const char **argv = *argvp;
+	const char *name;
 	struct object_id oid;
 	int nr;
 
@@ -979,33 +980,33 @@ static void parse_upstream(struct rebase_options *options,
 		struct branch *branch;
 
 		branch = branch_get(NULL);
-		options->upstream_name = branch_get_upstream(branch, NULL);
-		if (!options->upstream_name)
+		name = branch_get_upstream(branch, NULL);
+		if (!name)
 			error_on_missing_default_upstream();
 		if (options->fork_point < 0)
 			options->fork_point = 1;
 	} else {
-		options->upstream_name = argv[0];
+		name = argv[0];
 		argc--;
 		argv++;
-		if (!strcmp(options->upstream_name, "-"))
-			options->upstream_name = "@{-1}";
+		if (!strcmp(name, "-"))
+			name = "@{-1}";
 	}
-	nr = dwim_ref(options->upstream_name, strlen(options->upstream_name),
+	nr = dwim_ref(name, strlen(name),
 		      &oid, &options->upstream_ref, 0);
 	if (nr == 0) {
 		options->upstream =
-			lookup_commit_reference_by_name(options->upstream_name);
+			lookup_commit_reference_by_name(name);
 	} else if (nr < 2 ||
-		   !strcmp(options->upstream_name, options->upstream_ref)) {
+		   !strcmp(name, options->upstream_ref)) {
 		options->upstream =
 			lookup_commit_reference(the_repository, &oid);
 	} else {
 		free(options->upstream_ref);
-		die(_("ambiguous upstream name: '%s'"), options->upstream_name);
+		die(_("ambiguous upstream name: '%s'"), name);
 	}
 	if (!options->upstream)
-		die(_("invalid upstream '%s'"), options->upstream_name);
+		die(_("invalid upstream '%s'"), name);
 
 	if (options->fork_point > 0 &&
 	    (!nr || !(starts_with(options->upstream_ref, "refs/heads/") ||
@@ -1014,6 +1015,14 @@ static void parse_upstream(struct rebase_options *options,
 			name);
 		options->fork_point = 0;
 	}
+
+	if (nr)
+		options->upstream_name =
+			shorten_unambiguous_ref(options->upstream_ref, 1);
+	else
+		options->upstream_name =
+			xstrdup(find_unique_abbrev(&options->upstream->object.oid,
+						   DEFAULT_ABBREV));
 
 	options->upstream_arg = options->upstream_name;
 	*argcp = argc;
@@ -1829,6 +1838,7 @@ cleanup:
 	strbuf_release(&buf);
 	strbuf_release(&revisions);
 	free(options.head_name);
+	free(options.upstream_name);
 	free(options.upstream_ref);
 	free(options.gpg_sign_opt);
 	free(options.cmd);
