@@ -966,6 +966,39 @@ static void NORETURN error_on_missing_default_upstream(void)
 	exit(1);
 }
 
+static void parse_upstream(struct rebase_options *options,
+			   int *argcp, const char ***argvp)
+{
+	int argc = *argcp;
+	const char **argv = *argvp;
+
+	if (argc < 1) {
+		struct branch *branch;
+
+		branch = branch_get(NULL);
+		options->upstream_name = branch_get_upstream(branch,
+							     NULL);
+		if (!options->upstream_name)
+			error_on_missing_default_upstream();
+		if (options->fork_point < 0)
+			options->fork_point = 1;
+	} else {
+		options->upstream_name = argv[0];
+		argc--;
+		argv++;
+		if (!strcmp(options->upstream_name, "-"))
+			options->upstream_name = "@{-1}";
+	}
+	options->upstream =
+		lookup_commit_reference_by_name(options->upstream_name);
+	if (!options->upstream)
+		die(_("invalid upstream '%s'"), options->upstream_name);
+	options->upstream_arg = options->upstream_name;
+
+	*argcp = argc;
+	*argvp = argv;
+}
+
 static void set_reflog_action(struct rebase_options *options)
 {
 	const char *env;
@@ -1513,28 +1546,7 @@ int cmd_rebase(int argc, const char **argv, const char *prefix)
 	}
 
 	if (!options.root) {
-		if (argc < 1) {
-			struct branch *branch;
-
-			branch = branch_get(NULL);
-			options.upstream_name = branch_get_upstream(branch,
-								    NULL);
-			if (!options.upstream_name)
-				error_on_missing_default_upstream();
-			if (options.fork_point < 0)
-				options.fork_point = 1;
-		} else {
-			options.upstream_name = argv[0];
-			argc--;
-			argv++;
-			if (!strcmp(options.upstream_name, "-"))
-				options.upstream_name = "@{-1}";
-		}
-		options.upstream =
-			lookup_commit_reference_by_name(options.upstream_name);
-		if (!options.upstream)
-			die(_("invalid upstream '%s'"), options.upstream_name);
-		options.upstream_arg = options.upstream_name;
+		parse_upstream(&options, &argc, &argv);
 	} else {
 		if (!options.onto_name) {
 			if (commit_tree("", 0, the_hash_algo->empty_tree, NULL,
