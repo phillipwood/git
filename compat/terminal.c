@@ -8,11 +8,25 @@
 
 #if defined(HAVE_DEV_TTY) || defined(GIT_WINDOWS_NATIVE)
 
+static volatile sig_atomic_t pop_sigchain_on_restore;
+
 static void restore_term_on_signal(int sig)
 {
 	restore_term();
-	sigchain_pop(sig);
+	/* restore_term calls sigchain_pop_common */
 	raise(sig);
+}
+
+static void sigchain_push_restore(void)
+{
+	pop_sigchain_on_restore = 1;
+	sigchain_push_common(restore_term_on_signal);
+}
+
+static void sigchain_pop_restore(void)
+{
+	sigchain_pop_common();
+	pop_sigchain_on_restore = 0;
 }
 
 #ifdef HAVE_DEV_TTY
@@ -31,6 +45,8 @@ void restore_term(void)
 	tcsetattr(term_fd, TCSAFLUSH, &old_term);
 	close(term_fd);
 	term_fd = -1;
+	if (pop_sigchain_on_restore)
+		sigchain_pop_restore();
 }
 
 int save_term(int full_duplex)
@@ -49,11 +65,12 @@ static int disable_bits(tcflag_t bits)
 		goto error;
 
 	t = old_term;
-	sigchain_push_common(restore_term_on_signal);
+	sigchain_push_restore();
 
 	t.c_lflag &= ~bits;
 	if (!tcsetattr(term_fd, TCSAFLUSH, &t))
 		return 0;
+	sigchain_pop_restore();
 
 error:
 	close(term_fd);
@@ -99,6 +116,9 @@ void restore_term(void)
 		string_list_clear(&stty_restore, 0);
 		return;
 	}
+
+	if (pop_sigchain_on_restore)
+		sigchain_pop_restore();
 
 	if (hconin == INVALID_HANDLE_VALUE)
 		return;
@@ -177,10 +197,11 @@ static int disable_bits(DWORD bits)
 	if (save_term(0) < 0)
 		return -1;
 
-	sigchain_push_common(restore_term_on_signal);
+	sigchain_push_restore();
 	if (!SetConsoleMode(hconin, cmode_in & ~bits)) {
 		CloseHandle(hconin);
 		hconin = INVALID_HANDLE_VALUE;
+		sigchain_pop_restore();
 		return -1;
 	}
 
