@@ -57,7 +57,7 @@ static int launch_specified_editor(const char *editor, const char *path,
 	if (strcmp(editor, ":")) {
 		struct strbuf realpath = STRBUF_INIT;
 		struct child_process p = CHILD_PROCESS_INIT;
-		int ret, sig;
+		int ret;
 		int print_waiting_for_editor = advice_enabled(ADVICE_WAITING_FOR_EDITOR) && isatty(2);
 
 		if (print_waiting_for_editor) {
@@ -82,21 +82,14 @@ static int launch_specified_editor(const char *editor, const char *path,
 		if (env)
 			strvec_pushv(&p.env_array, (const char **)env);
 		p.use_shell = 1;
+		p.wait_after_clean = 1;
 		p.trace2_child_class = "editor";
 		if (start_command(&p) < 0) {
 			strbuf_release(&realpath);
 			return error("unable to start editor '%s'", editor);
 		}
-
-		sigchain_push(SIGINT, SIG_IGN);
-		sigchain_push(SIGQUIT, SIG_IGN);
 		ret = finish_command(&p);
 		strbuf_release(&realpath);
-		sig = ret - 128;
-		sigchain_pop(SIGINT);
-		sigchain_pop(SIGQUIT);
-		if (sig == SIGINT || sig == SIGQUIT)
-			raise(sig);
 		if (ret)
 			return error("There was a problem with the editor '%s'.",
 					editor);
