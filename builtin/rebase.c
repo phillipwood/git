@@ -94,7 +94,7 @@ struct rebase_options {
 	int autostash;
 	int committer_date_is_author_date;
 	int ignore_date;
-	char *cmd;
+	struct string_list exec;
 	int allow_empty_message;
 	int rebase_merges, rebase_cousins;
 	char *strategy, *strategy_opts;
@@ -113,6 +113,7 @@ struct rebase_options {
 		.git_am_opts = STRVEC_INIT,		\
 		.git_format_patch_opt = STRBUF_INIT,	\
 		.fork_point = -1,			\
+		.exec = STRING_LIST_INIT_NODUP,		\
 	}
 
 static struct replay_opts get_replay_opts(const struct rebase_options *opts)
@@ -240,17 +241,6 @@ static int init_basic_state(struct replay_opts *opts, const char *head_name,
 	return write_basic_state(opts, head_name, onto, orig_head);
 }
 
-static void split_exec_commands(const char *cmd, struct string_list *commands)
-{
-	if (cmd && *cmd) {
-		string_list_split(commands, cmd, '\n', -1);
-
-		/* rebase.c adds a new line to cmd after every command,
-		 * so here the last command is always empty */
-		string_list_remove_empty_items(commands, 0);
-	}
-}
-
 static int do_interactive_rebase(struct rebase_options *opts, unsigned flags)
 {
 	int ret;
@@ -294,10 +284,9 @@ static int do_interactive_rebase(struct rebase_options *opts, unsigned flags)
 						&todo_list))
 			BUG("unusable todo list");
 
-		split_exec_commands(opts->cmd, &commands);
 		ret = complete_action(the_repository, &replay, flags,
 			shortrevisions, opts->onto_name, opts->onto,
-			&opts->orig_head, &commands, opts->autosquash,
+			&opts->orig_head, &opts->exec, opts->autosquash,
 			&todo_list);
 	}
 
@@ -1010,7 +999,6 @@ int cmd_rebase(int argc, const char **argv, const char *prefix)
 	int ignore_whitespace = 0;
 	enum action action = ACTION_NONE;
 	const char *gpg_sign = NULL;
-	struct string_list exec = STRING_LIST_INIT_NODUP;
 	const char *rebase_merges = NULL;
 	struct string_list strategy_options = STRING_LIST_INIT_NODUP;
 	struct object_id squash_onto;
@@ -1101,7 +1089,7 @@ int cmd_rebase(int argc, const char **argv, const char *prefix)
 			N_("GPG-sign commits"),
 			PARSE_OPT_OPTARG, NULL, (intptr_t) "" },
 		OPT_AUTOSTASH(&options.autostash),
-		OPT_STRING_LIST('x', "exec", &exec, N_("exec"),
+		OPT_STRING_LIST('x', "exec", &options.exec, N_("exec"),
 				N_("add exec lines after each commit of the "
 				   "editable list")),
 		OPT_BOOL_F(0, "allow-empty-message",
@@ -1210,7 +1198,7 @@ int cmd_rebase(int argc, const char **argv, const char *prefix)
 	if (trace2_is_enabled()) {
 		if (is_merge(&options))
 			trace2_cmd_mode("interactive");
-		else if (exec.nr)
+		else if (options.exec.nr)
 			trace2_cmd_mode("interactive-exec");
 		else
 			trace2_cmd_mode(action_names[action]);
@@ -1336,7 +1324,7 @@ int cmd_rebase(int argc, const char **argv, const char *prefix)
 
 	if ((options.flags & REBASE_INTERACTIVE_EXPLICIT) ||
 	    (action != ACTION_NONE) ||
-	    (exec.nr > 0) ||
+	    (options.exec.nr > 0) ||
 	    options.autosquash) {
 		allow_preemptive_ff = 0;
 	}
@@ -1360,8 +1348,8 @@ int cmd_rebase(int argc, const char **argv, const char *prefix)
 		}
 	}
 
-	for (i = 0; i < exec.nr; i++)
-		if (check_exec_cmd(exec.items[i].string))
+	for (i = 0; i < options.exec.nr; i++)
+		if (check_exec_cmd(options.exec.items[i].string))
 			exit(1);
 
 	if (!(options.flags & REBASE_NO_QUIET))
@@ -1376,16 +1364,8 @@ int cmd_rebase(int argc, const char **argv, const char *prefix)
 	if (gpg_sign)
 		options.gpg_sign_opt = xstrfmt("-S%s", gpg_sign);
 
-	if (exec.nr) {
-		int i;
-
+	if (options.exec.nr)
 		imply_merge(&options, "--exec");
-
-		strbuf_reset(&buf);
-		for (i = 0; i < exec.nr; i++)
-			strbuf_addf(&buf, "exec %s\n", exec.items[i].string);
-		options.cmd = xstrdup(buf.buf);
-	}
 
 	if (rebase_merges) {
 		if (!*rebase_merges)
@@ -1497,7 +1477,7 @@ int cmd_rebase(int argc, const char **argv, const char *prefix)
 	if (options.empty == EMPTY_UNSPECIFIED) {
 		if (options.flags & REBASE_INTERACTIVE_EXPLICIT)
 			options.empty = EMPTY_ASK;
-		else if (exec.nr > 0)
+		else if (options.exec.nr > 0)
 			options.empty = EMPTY_KEEP;
 		else
 			options.empty = EMPTY_DROP;
@@ -1798,7 +1778,6 @@ cleanup:
 	strbuf_release(&revisions);
 	free(options.head_name);
 	free(options.gpg_sign_opt);
-	free(options.cmd);
 	free(options.strategy);
 	strbuf_release(&options.git_format_patch_opt);
 	free(squash_onto_name);

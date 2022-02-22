@@ -5442,23 +5442,20 @@ static void todo_list_add_exec_commands(struct todo_list *todo_list,
 					struct string_list *commands)
 {
 	struct strbuf *buf = &todo_list->buf;
-	size_t base_offset = buf->len;
 	int i, insert, nr = 0, alloc = 0;
 	struct todo_item *items = NULL, *base_items = NULL;
 
 	CALLOC_ARRAY(base_items, commands->nr);
 	for (i = 0; i < commands->nr; i++) {
 		size_t command_len = strlen(commands->items[i].string);
+		size_t base_offset = buf->len;
 
-		strbuf_addstr(buf, commands->items[i].string);
-		strbuf_addch(buf, '\n');
+		strbuf_addf(buf, "exec %s\n", commands->items[i].string);
 
 		base_items[i].command = TODO_EXEC;
 		base_items[i].offset_in_buf = base_offset;
 		base_items[i].arg_offset = base_offset + strlen("exec ");
-		base_items[i].arg_len = command_len - strlen("exec ");
-
-		base_offset += command_len + 1;
+		base_items[i].arg_len = command_len;
 	}
 
 	/*
