@@ -650,35 +650,38 @@ static int add(int ac, const char **av, const char *prefix)
 	return add_worktree(path, branch, &opts);
 }
 
-static void show_worktree_porcelain(struct worktree *wt)
+static void show_worktree_porcelain(struct worktree *wt, int line_terminator)
 {
 	const char *reason;
 
-	printf("worktree %s\n", wt->path);
+	printf("worktree %s%c", wt->path, line_terminator);
 	if (wt->is_bare)
-		printf("bare\n");
+		printf("bare%c", line_terminator);
 	else {
-		printf("HEAD %s\n", oid_to_hex(&wt->head_oid));
+		printf("HEAD %s%c", oid_to_hex(&wt->head_oid), line_terminator);
 		if (wt->is_detached)
-			printf("detached\n");
+			printf("detached%c", line_terminator);
 		else if (wt->head_ref)
-			printf("branch %s\n", wt->head_ref);
+			printf("branch %s%c", wt->head_ref, line_terminator);
 	}
 
 	reason = worktree_lock_reason(wt);
 	if (reason && *reason) {
 		struct strbuf sb = STRBUF_INIT;
-		quote_c_style(reason, &sb, NULL, 0);
-		printf("locked %s\n", sb.buf);
+		if (line_terminator) {
+			quote_c_style(reason, &sb, NULL, 0);
+			reason = sb.buf;
+		}
+		printf("locked %s%c", reason, line_terminator);
 		strbuf_release(&sb);
 	} else if (reason)
-		printf("locked\n");
+		printf("locked%c", line_terminator);
 
 	reason = worktree_prune_reason(wt, expire);
 	if (reason)
-		printf("prunable %s\n", reason);
+		printf("prunable %s%c", reason, line_terminator);
 
-	printf("\n");
+	fputc(line_terminator, stdout);
 }
 
 static void show_worktree(struct worktree *wt, int path_maxlen, int abbrev_len)
@@ -756,12 +759,15 @@ static void pathsort(struct worktree **wt)
 static int list(int ac, const char **av, const char *prefix)
 {
 	int porcelain = 0;
+	int line_terminator = '\n';
 
 	struct option options[] = {
 		OPT_BOOL(0, "porcelain", &porcelain, N_("machine-readable output")),
 		OPT__VERBOSE(&verbose, N_("show extended annotations and reasons, if available")),
 		OPT_EXPIRY_DATE(0, "expire", &expire,
 				N_("add 'prunable' annotation to worktrees older than <time>")),
+		OPT_SET_INT('z', NULL, &line_terminator,
+			    N_("fields are separated with NUL character"), '\0'),
 		OPT_END()
 	};
 
@@ -771,6 +777,8 @@ static int list(int ac, const char **av, const char *prefix)
 		usage_with_options(worktree_usage, options);
 	else if (verbose && porcelain)
 		die(_("options '%s' and '%s' cannot be used together"), "--verbose", "--porcelain");
+	else if (!line_terminator && !porcelain)
+		die(_("'-z' requires '--porcelain'"));
 	else {
 		struct worktree **worktrees = get_worktrees();
 		int path_maxlen = 0, abbrev = DEFAULT_ABBREV, i;
@@ -783,7 +791,8 @@ static int list(int ac, const char **av, const char *prefix)
 
 		for (i = 0; worktrees[i]; i++) {
 			if (porcelain)
-				show_worktree_porcelain(worktrees[i]);
+				show_worktree_porcelain(worktrees[i],
+							line_terminator);
 			else
 				show_worktree(worktrees[i], path_maxlen, abbrev);
 		}

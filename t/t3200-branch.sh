@@ -886,6 +886,41 @@ test_expect_success 'branch from tag w/--track causes failure' '
 	test_must_fail git branch --track my11 foobar
 '
 
+test_expect_success 'simple tracking works when remote branch name matches' '
+	test_create_repo otherserver &&
+	test_commit -C otherserver my_commit 1 &&
+	git -C otherserver branch feature &&
+	git config branch.autosetupmerge simple &&
+	git config remote.otherserver.url otherserver &&
+	git config remote.otherserver.fetch refs/heads/*:refs/remotes/otherserver/* &&
+	git fetch otherserver &&
+	git branch feature otherserver/feature &&
+	rm -fr otherserver &&
+	test $(git config branch.feature.remote) = otherserver &&
+	test $(git config branch.feature.merge) = refs/heads/feature
+'
+
+test_expect_success 'simple tracking skips when remote branch name does not match' '
+	git config branch.autosetupmerge simple &&
+	git config remote.local.url . &&
+	git config remote.local.fetch refs/heads/*:refs/remotes/local/* &&
+	(git show-ref -q refs/remotes/local/main || git fetch local) &&
+	git branch my-other local/main &&
+	test -z "$(git config branch.my-other.remote)" &&
+	test -z "$(git config branch.my-other.merge)"
+'
+
+test_expect_success 'simple tracking skips when remote ref is not a branch' '
+	git config branch.autosetupmerge simple &&
+	git tag mytag12 main &&
+	git config remote.localtags.url . &&
+	git config remote.localtags.fetch refs/tags/*:refs/remotes/localtags/* &&
+	(git show-ref -q refs/remotes/localtags/mytag12 || git fetch localtags) &&
+	git branch mytag12 localtags/mytag12 &&
+	test -z "$(git config branch.mytag12.remote)" &&
+	test -z "$(git config branch.mytag12.merge)"
+'
+
 test_expect_success '--set-upstream-to fails on multiple branches' '
 	echo "fatal: too many arguments to set new upstream" >expect &&
 	test_must_fail git branch --set-upstream-to main a b c 2>err &&

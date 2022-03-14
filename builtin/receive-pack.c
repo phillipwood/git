@@ -749,7 +749,7 @@ static void prepare_push_cert_sha1(struct child_process *proc)
 		int bogs /* beginning_of_gpg_sig */;
 
 		already_done = 1;
-		if (write_object_file(push_cert.buf, push_cert.len, "blob",
+		if (write_object_file(push_cert.buf, push_cert.len, OBJ_BLOB,
 				      &push_cert_oid))
 			oidclr(&push_cert_oid);
 
@@ -813,13 +813,14 @@ static int run_and_feed_hook(const char *hook_name, feed_fn feed,
 	proc.trace2_hook_name = hook_name;
 
 	if (feed_state->push_options) {
-		int i;
+		size_t i;
 		for (i = 0; i < feed_state->push_options->nr; i++)
 			strvec_pushf(&proc.env_array,
-				     "GIT_PUSH_OPTION_%d=%s", i,
+				     "GIT_PUSH_OPTION_%"PRIuMAX"=%s",
+				     (uintmax_t)i,
 				     feed_state->push_options->items[i].string);
-		strvec_pushf(&proc.env_array, "GIT_PUSH_OPTION_COUNT=%d",
-			     feed_state->push_options->nr);
+		strvec_pushf(&proc.env_array, "GIT_PUSH_OPTION_COUNT=%"PRIuMAX"",
+			     (uintmax_t)feed_state->push_options->nr);
 	} else
 		strvec_pushf(&proc.env_array, "GIT_PUSH_OPTION_COUNT");
 
@@ -1408,10 +1409,12 @@ static const char *push_to_deploy(unsigned char *sha1,
 static const char *push_to_checkout_hook = "push-to-checkout";
 
 static const char *push_to_checkout(unsigned char *hash,
+				    int *invoked_hook,
 				    struct strvec *env,
 				    const char *work_tree)
 {
 	struct run_hooks_opt opt = RUN_HOOKS_OPT_INIT;
+	opt.invoked_hook = invoked_hook;
 
 	strvec_pushf(env, "GIT_WORK_TREE=%s", absolute_path(work_tree));
 	strvec_pushv(&opt.env, env->v);
@@ -1426,6 +1429,7 @@ static const char *update_worktree(unsigned char *sha1, const struct worktree *w
 {
 	const char *retval, *git_dir;
 	struct strvec env = STRVEC_INIT;
+	int invoked_hook;
 
 	if (!worktree || !worktree->path)
 		BUG("worktree->path must be non-NULL");
@@ -1436,10 +1440,9 @@ static const char *update_worktree(unsigned char *sha1, const struct worktree *w
 
 	strvec_pushf(&env, "GIT_DIR=%s", absolute_path(git_dir));
 
-	if (!hook_exists(push_to_checkout_hook))
+	retval = push_to_checkout(sha1, &invoked_hook, &env, worktree->path);
+	if (!invoked_hook)
 		retval = push_to_deploy(sha1, &env, worktree->path);
-	else
-		retval = push_to_checkout(sha1, &env, worktree->path);
 
 	strvec_clear(&env);
 	return retval;
@@ -1959,6 +1962,22 @@ static void execute_commands(struct command *commands,
 				cmd->error_string = "pre-receive hook declined";
 		}
 		return;
+	}
+
+	/*
+	 * Send a keepalive packet on sideband 2 (progress info) to notice
+	 * a client that has disconnected (e.g. killed with ^C) while
+	 * pre-receive was running.
+	 */
+	if (use_sideband) {
+		static const char buf[] = "0005\2";
+		if (write_in_full(1, buf, sizeof(buf) - 1) < 0) {
+			for (cmd = commands; cmd; cmd = cmd->next) {
+				if (!cmd->error_string)
+					cmd->error_string = "pusher went away";
+			}
+			return;
+		}
 	}
 
 	/*

@@ -1568,7 +1568,7 @@ int commit_tree_extended(const char *msg, size_t msg_len,
 		goto out;
 	}
 
-	result = write_object_file(buffer.buf, buffer.len, commit_type, ret);
+	result = write_object_file(buffer.buf, buffer.len, OBJ_COMMIT, ret);
 out:
 	strbuf_release(&buffer);
 	return result;
@@ -1713,7 +1713,7 @@ size_t ignore_non_trailer(const char *buf, size_t len)
 }
 
 int run_commit_hook(int editor_is_used, const char *index_file,
-		    const char *name, ...)
+		    int *invoked_hook, const char *name, ...)
 {
 	struct run_hooks_opt opt = RUN_HOOKS_OPT_INIT;
 	va_list args;

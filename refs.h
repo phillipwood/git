@@ -82,6 +82,9 @@ int read_ref_full(const char *refname, int resolve_flags,
 		  struct object_id *oid, int *flags);
 int read_ref(const char *refname, struct object_id *oid);
 
+int refs_read_symbolic_ref(struct ref_store *ref_store, const char *refname,
+			   struct strbuf *referent);
+
 /*
  * Return 0 if a reference named refname could be created without
  * conflicting with the name of an existing reference. Otherwise,
@@ -775,6 +778,20 @@ int ref_transaction_abort(struct ref_transaction *transaction,
  */
 int initial_ref_transaction_commit(struct ref_transaction *transaction,
 				   struct strbuf *err);
+
+/*
+ * Execute the given callback function for each of the reference updates which
+ * have been queued in the given transaction. `old_oid` and `new_oid` may be
+ * `NULL` pointers depending on whether the update has these object IDs set or
+ * not.
+ */
+typedef void ref_transaction_for_each_queued_update_fn(const char *refname,
+						       const struct object_id *old_oid,
+						       const struct object_id *new_oid,
+						       void *cb_data);
+void ref_transaction_for_each_queued_update(struct ref_transaction *transaction,
+					    ref_transaction_for_each_queued_update_fn cb,
+					    void *cb_data);
 
 /*
  * Free `*transaction` and all associated data.

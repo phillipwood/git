@@ -1673,6 +1673,23 @@ int refs_read_raw_ref(struct ref_store *ref_store, const char *refname,
 					   type, failure_errno);
 }
 
+int refs_read_symbolic_ref(struct ref_store *ref_store, const char *refname,
+			   struct strbuf *referent)
+{
+	struct object_id oid;
+	int ret, failure_errno = 0;
+	unsigned int type = 0;
+
+	if (ref_store->be->read_symbolic_ref)
+		return ref_store->be->read_symbolic_ref(ref_store, refname, referent);
+
+	ret = refs_read_raw_ref(ref_store, refname, &oid, referent, &type, &failure_errno);
+	if (ret || !(type & REF_ISSYMREF))
+		return -1;
+
+	return 0;
+}
+
 const char *refs_resolve_ref_unsafe(struct ref_store *refs,
 				    const char *refname,
 				    int resolve_flags,
@@ -2416,6 +2433,22 @@ int initial_ref_transaction_commit(struct ref_transaction *transaction,
 	struct ref_store *refs = transaction->ref_store;
 
 	return refs->be->initial_transaction_commit(refs, transaction, err);
+}
+
+void ref_transaction_for_each_queued_update(struct ref_transaction *transaction,
+					    ref_transaction_for_each_queued_update_fn cb,
+					    void *cb_data)
+{
+	int i;
+
+	for (i = 0; i < transaction->nr; i++) {
+		struct ref_update *update = transaction->updates[i];
+
+		cb(update->refname,
+		   (update->flags & REF_HAVE_OLD) ? &update->old_oid : NULL,
+		   (update->flags & REF_HAVE_NEW) ? &update->new_oid : NULL,
+		   cb_data);
+	}
 }
 
 int refs_delete_refs(struct ref_store *refs, const char *logmsg,

@@ -139,6 +139,11 @@ void restore_term(void)
 	reset_job_signals();
 }
 
+static int is_controlling_terminal(int fd)
+{
+	return (getpgid(0) == tcgetpgrp(fd));
+}
+
 int save_term(enum save_term_flags flags)
 {
 	struct sigaction sa;
@@ -150,6 +155,10 @@ int save_term(enum save_term_flags flags)
 	if (term_fd < 0)
 		return -1;
 	term_fd_needs_closing = !(flags & SAVE_TERM_STDIN);
+	if ((flags & SAVE_TERM_DUPLEX) && !is_controlling_terminal(term_fd)) {
+		close_term_fd();
+		return -1;
+	}
 	if (tcgetattr(term_fd, &old_term) < 0) {
 		close_term_fd();
 		return -1;

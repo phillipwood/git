@@ -33,6 +33,7 @@
 #include "packfile.h"
 #include "list-objects-filter-options.h"
 #include "hook.h"
+#include "bundle.h"
 
 /*
  * Overall FIXMEs:
@@ -700,6 +701,8 @@ static int checkout(int submodule_progress, int filter_submodules)
 	init_checkout_metadata(&opts.meta, head, &oid, NULL);
 
 	tree = parse_tree_indirect(&oid);
+	if (!tree)
+		die(_("unable to parse commit %s"), oid_to_hex(&oid));
 	parse_tree(tree);
 	init_tree_desc(&t, tree->buffer, tree->size);
 	if (unpack_trees(1, &t, &opts) < 0)
@@ -1169,6 +1172,18 @@ int cmd_clone(int argc, const char **argv, const char *prefix)
 	if (option_local > 0 && !is_local)
 		warning(_("--local is ignored"));
 	transport->cloning = 1;
+
+	if (is_bundle) {
+		struct bundle_header header = BUNDLE_HEADER_INIT;
+		int fd = read_bundle_header(path, &header);
+		int has_filter = header.filter.choice != LOFC_DISABLED;
+
+		if (fd > 0)
+			close(fd);
+		bundle_header_release(&header);
+		if (has_filter)
+			die(_("cannot clone from filtered bundle"));
+	}
 
 	transport_set_option(transport, TRANS_OPT_KEEP, "yes");
 

@@ -1367,6 +1367,7 @@ void run_active_slot(struct active_request_slot *slot)
 			select(max_fd+1, &readfds, &writefds, &excfds, &select_timeout);
 		}
 	}
+	slot->finished = NULL;
 }
 
 static void release_active_slot(struct active_request_slot *slot)
