@@ -465,17 +465,12 @@ static void filter_prefetch_refspec(struct refspec *rs)
 			continue;
 		if (!rs->items[i].dst ||
 		    (rs->items[i].src &&
-		     !strncmp(rs->items[i].src, "refs/tags/", 10))) {
-			int j;
-
-			free(rs->items[i].src);
-			free(rs->items[i].dst);
-
-			for (j = i + 1; j < rs->nr; j++) {
-				rs->items[j - 1] = rs->items[j];
-				rs->raw[j - 1] = rs->raw[j];
-			}
+		     starts_with(rs->items[i].src, "refs/tags/"))) {
+			refspec_item_clear(&rs->items[i]);
+			free((char *)rs->raw[i]);
 			rs->nr--;
+			MOVE_ARRAY(&rs->items[i], &rs->items[i + 1], rs->nr - i);
+			MOVE_ARRAY(&rs->raw[i], &rs->raw[i + 1], rs->nr - i);
 			i--;
 			continue;
 		}
