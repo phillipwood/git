@@ -193,9 +193,8 @@ static ssize_t find_unique(const char *string, struct prefix_item_list *list)
 	struct string_list_item *item;
 
 	if (list->items.nr != list->sorted.nr)
-		BUG("prefix_item_list in inconsistent state (%"PRIuMAX
-		    " vs %"PRIuMAX")",
-		    (uintmax_t)list->items.nr, (uintmax_t)list->sorted.nr);
+		BUG("prefix_item_list in inconsistent state (%zu vs %zu)",
+		    list->items.nr, list->sorted.nr);
 
 	if (index < 0)
 		item = list->sorted.items[-1 - index].util;

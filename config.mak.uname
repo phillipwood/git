@@ -683,7 +683,7 @@ else
 			BASIC_LDFLAGS += -Wl,--large-address-aware
 		endif
 		CC = gcc
-		COMPAT_CFLAGS += -D__USE_MINGW_ANSI_STDIO=0 -DDETECT_MSYS_TTY \
+		COMPAT_CFLAGS += -D__USE_MINGW_ANSI_STDIO=1 -DDETECT_MSYS_TTY \
 			-fstack-protector-strong
 		EXTLIBS += -lntdll
 		INSTALL = /bin/install
@@ -700,7 +700,7 @@ else
 			ETC_GITATTRIBUTES = ../etc/gitattributes
 		endif
 	else
-		COMPAT_CFLAGS += -D__USE_MINGW_ANSI_STDIO
+		COMPAT_CFLAGS += -D__USE_MINGW_ANSI_STDIO=1
 		NO_CURL = YesPlease
 	endif
 endif
