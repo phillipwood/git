@@ -1119,26 +1119,87 @@ static void recolor_hunk(struct add_p_state *s, struct hunk *hunk)
 	hunk->colored_end = s->colored.len;
 }
 
+struct edited_hunk {
+	unsigned has_hunk_header :1;
+	unsigned long old_offset, old_count, new_offset, new_count;
+};
+
+#define EDITED_HUNK_INIT { 0 }
+
 static int parse_edited_hunk(struct add_p_state *s, struct hunk *hunk)
 {
-	size_t i;
+	struct edited_hunk edited = EDITED_HUNK_INIT;
+	size_t i, plain_len;
+	int in_hunk = 0, ret = 1;
 
-	/* strip out commented lines */
-	hunk->start = s->plain.len;
+	hunk->start = plain_len = s->plain.len;
 	for (i = 0; i < s->buf.len; ) {
 		size_t next = find_next_line(&s->buf, i);
+		char c = s->buf.buf[i];
 
-		if (!starts_with(s->buf.buf + i, comment_line_str))
+		switch (c) {
+		case '+':
+			edited.new_count++;
+			in_hunk = 1;
 			strbuf_add(&s->plain, s->buf.buf + i, next - i);
+			break;
+		case '-':
+			edited.old_count++;
+			in_hunk = 1;
+			strbuf_add(&s->plain, s->buf.buf + i, next - i);
+			break;
+		case ' ': case '\n': case '\r':
+			edited.old_count++;
+			edited.new_count++;
+			in_hunk = 1;
+			strbuf_add(&s->plain, s->buf.buf + i, next - i);
+			break;
+		case '\\':
+			in_hunk = 1;
+			strbuf_add(&s->plain, s->buf.buf + i, next - i);
+			break;
+		case '@': {
+			unsigned long old_off, new_off;
+
+			if (!in_hunk) {
+				if (parse_hunk_header_line(s->buf.buf + i,
+							   &old_off, NULL,
+							   &new_off, NULL)) {
+					hunk->start = s->plain.len;
+					edited.old_offset = old_off;
+					edited.new_offset = new_off;
+					edited.has_hunk_header = 1;
+				} else {
+					ret = error(_("could not parse hunk header"));
+				}
+			} else {
+				strbuf_add(&s->plain, s->buf.buf + i, next - i);
+			}
+			in_hunk = 1;
+			break;
+		}
+		default:
+			if (!starts_with(s->buf.buf + i, comment_line_str))
+				strbuf_add(&s->plain, s->buf.buf + i, next - i);
+		}
 		i = next;
 	}
 
 	hunk->end = s->plain.len;
-	if (hunk->end == hunk->start)
+	if (hunk->end == hunk->start && !edited.has_hunk_header)
 		/* The user aborted editing by deleting everything */
 		return 0;
 
-	return 1;
+	if (edited.has_hunk_header) {
+		hunk->header.old_offset = edited.old_offset;
+		hunk->header.new_offset = edited.new_offset;
+	}
+	hunk->delta += hunk->header.old_count - hunk->header.new_count -
+		       edited.old_count + edited.new_count;
+	hunk->header.old_count = edited.old_count;
+	hunk->header.new_count = edited.new_count;
+
+	return ret;
 }
 
 static int edit_hunk_manually(struct add_p_state *s, struct hunk *hunk)
@@ -1181,44 +1242,7 @@ static int edit_hunk_manually(struct add_p_state *s, struct hunk *hunk)
 
 	recolor_hunk(s, hunk);
 
-	/*
-	 * If the hunk header is intact, parse it, otherwise simply use the
-	 * hunk header prior to editing (which will adjust `hunk->start` to
-	 * skip the hunk header).
-	 */
-	if (s->plain.buf[hunk->start] == '@' &&
-	    parse_hunk_header(s, hunk) < 0)
-		return error(_("could not parse hunk header"));
-
 	return 1;
-}
-
-static ssize_t recount_edited_hunk(struct add_p_state *s, struct hunk *hunk,
-				   size_t orig_old_count, size_t orig_new_count)
-{
-	struct hunk_header *header = &hunk->header;
-	size_t i;
-
-	header->old_count = header->new_count = 0;
-	for (i = hunk->start; i < hunk->end; ) {
-		switch (s->plain.buf[i]) {
-		case '-':
-			header->old_count++;
-			break;
-		case '+':
-			header->new_count++;
-			break;
-		case ' ': case '\r': case '\n':
-			header->old_count++;
-			header->new_count++;
-			break;
-		}
-
-		i = find_next_line(&s->plain, i);
-	}
-
-	return orig_old_count - orig_new_count
-		- header->old_count + header->new_count;
 }
 
 static int run_apply_check(struct add_p_state *s,
@@ -1280,21 +1304,14 @@ static int edit_hunk_loop(struct add_p_state *s,
 			/* abandoned */
 			*hunk = backup;
 			return -1;
-		}
-
-		if (res > 0) {
-			hunk->delta +=
-				recount_edited_hunk(s, hunk,
-						    backup.header.old_count,
-						    backup.header.new_count);
+		} else if (res > 0) {
 			if (!run_apply_check(s, file_diff))
 				return 0;
+			/* Drop edits (they were appended to s->plain) */
+			strbuf_setlen(&s->plain, plain_len);
+			strbuf_setlen(&s->colored, colored_len);
+			*hunk = backup;
 		}
-
-		/* Drop edits (they were appended to s->plain) */
-		strbuf_setlen(&s->plain, plain_len);
-		strbuf_setlen(&s->colored, colored_len);
-		*hunk = backup;
 
 		/*
 		 * TRANSLATORS: do not translate [y/n]
