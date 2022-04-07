@@ -1,0 +1,5 @@
+TODO:
+	remove mismatches from struct edited_hunk
+	add struct mismatches to check_edited_image()
+	remove nr from struct line
+	move test changes to next commit
