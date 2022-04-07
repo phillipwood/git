@@ -1242,6 +1242,102 @@ static void fill_mismatches(uint8_t *data, struct line_array *a,
 			m->mismatch[i - 1].i,m->mismatch[i - 1].j);
 }
 
+struct slicevec {
+	size_t alloc, nr;
+	struct strbuf *buf;
+struct slice {
+	size_t start, len;
+} *slice;
+};
+
+#define LINE_MATCH_SHIFT 16
+#define LINE_MATCH_THRESHOLD (1u << (LINE_MATCH_SHIFT - 2))
+static size_t match_line(struct slice *a, struct slicevec *av, struct slice *b, struct slicevec *bv,
+			 size_t **lastp, size_t *last_alloc)
+{
+	size_t *last = *lastp;
+	size_t i, j, cost, last_cost;
+	struct slice *slice_a = av->slice + a->start;
+	struct slice *slice_b = bv->slice + b->start;
+
+	ALLOC_GROW(last, b->len + 1, *last_alloc);
+	memset(last, 0, b->len + 1);
+	for (i = 0; i < a->len; i++) {
+		last_cost = 0;
+		for (j = 0; j < b->len; j++) {
+			if (slice_a[i].len == slice_b[j].len &&
+			    !memcmp(&av->buf->buf[slice_a[i].start],
+				    &bv->buf->buf[slice_b[j].start],
+				    slice_a[i].len)) {
+				cost = last[j];
+
+/* TODO: substitutions */
+			} else if (last_cost < last[j + 1]) {
+				cost = last[j + 1] + 1;
+			} else {
+				cost = last_cost + 1;
+			}
+			if (j)
+				last[j] = last_cost;
+			last_cost = cost;
+		}
+		last[j] = last_cost;
+	}
+
+	*lastp = last;
+	return (last_cost << LINE_MATCH_SHIFT) / (a->len + b->len + 8);
+}
+
+static void match_postimage(struct line_array *a, struct line_array *b,
+			    struct mismatches *mismatches,
+			    struct repository *r)
+{
+	size_t *last, *tmp = NULL;
+	size_t i, j,  tmp_alloc = 0;
+	size_t cost, last_cost;
+	uint8_t *data;
+
+	struct slicevec sliceva;
+	struct slicevec slicevb;
+	struct slice *slicea, *sliceb;
+	size_t slicea_alloc = 0, sliceb_alloc = 0;
+	// segment a & b
+
+	trace2_region_enter("add-p", "match-postimage", r);
+	CALLOC_ARRAY(last, b->nr + 1);
+	CALLOC_ARRAY(data, st_mult(a->nr, b->nr) / 4 + 1);
+	for (i = 0; i < a->nr; i++) {
+		last_cost = 0;
+		for (j = 0; j < b->nr; j++) {
+			size_t score = match_line(&slicea[i], &sliceva,
+				       &sliceb[j], &slicevb,
+				       &tmp, &tmp_alloc);
+			if (score < LINE_MATCH_THRESHOLD) {
+				cost = last[j] + score;
+				set_direction(data, i * b->nr + j, MATCH);
+			} else if (last_cost < last[j + 1]) {
+				set_direction(data, i * b->nr + j, DELETION);
+				cost = last[j + 1] + LINE_MATCH_THRESHOLD;
+			} else {
+				set_direction(data, i * b->nr + j, ADDITION);
+				cost = last_cost + LINE_MATCH_THRESHOLD;
+			}
+			if (j)
+				last[j] = last_cost;
+
+			last_cost = cost;
+		}
+		last[j] = last_cost;
+	}
+
+	fill_mismatches(data, a, b, mismatches);
+
+	free(data);
+	free(last);
+	free(tmp);
+	trace2_region_leave("add-p", "match-postimage", r);
+}
+
 static int line_eq(const char *base_a, struct line *a,
 		   const char *base_b, struct line *b)
 {
