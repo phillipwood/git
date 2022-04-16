@@ -151,6 +151,7 @@ static int already_written(struct bulk_checkin_packfile *state, struct object_id
  * status before calling us just in case we ask it to call us again
  * with a new pack.
  */
+__attribute__((no_sanitize("pointer-subtract")))
 static int stream_to_pack(struct bulk_checkin_packfile *state,
 			  git_hash_ctx *ctx, off_t *already_hashed_to,
 			  int fd, size_t size, enum object_type type,

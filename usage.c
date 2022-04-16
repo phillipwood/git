@@ -6,6 +6,7 @@
 #include "git-compat-util.h"
 #include "cache.h"
 
+__attribute__((no_sanitize ("pointer-subtract")))
 static void vreportf(const char *prefix, const char *err, va_list params)
 {
 	char msg[4096];

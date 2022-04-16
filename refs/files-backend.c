@@ -2009,6 +2009,7 @@ static int show_one_reflog_ent(struct strbuf *sb, each_reflog_ent_fn fn, void *c
 	return fn(&ooid, &noid, p, timestamp, tz, message, cb_data);
 }
 
+__attribute__ ((no_sanitize ("pointer-compare", "pointer-subtract")))
 static char *find_beginning_of_line(char *bob, char *scan)
 {
 	while (bob < scan && *(--scan) != '\n')
@@ -2020,6 +2021,7 @@ static char *find_beginning_of_line(char *bob, char *scan)
 	return scan;
 }
 
+__attribute__ ((no_sanitize ("pointer-compare", "pointer-subtract")))
 static int files_for_each_reflog_ent_reverse(struct ref_store *ref_store,
 					     const char *refname,
 					     each_reflog_ent_fn fn,

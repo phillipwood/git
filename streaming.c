@@ -166,7 +166,7 @@ static struct git_istream *attach_stream_filter(struct git_istream *st,
  * Loose object stream
  *
  *****************************************************************/
-
+__attribute__((no_sanitize("pointer-subtract")))
 static ssize_t read_istream_loose(struct git_istream *st, char *buf, size_t sz)
 {
 	size_t total_read = 0;
@@ -262,6 +262,7 @@ error:
  *
  *****************************************************************/
 
+__attribute__((no_sanitize("pointer-subtract")))
 static ssize_t read_istream_pack_non_delta(struct git_istream *st, char *buf,
 					   size_t sz)
 {

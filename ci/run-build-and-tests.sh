@@ -5,10 +5,14 @@
 
 . ${0%/*}/lib.sh
 
-case "$CI_OS_NAME" in
-windows*) cmd //c mklink //j t\\.prove "$(cygpath -aw "$cache_dir/.prove")";;
-*) ln -s "$cache_dir/.prove" t/.prove;;
-esac
+if test "$1" = --test || test -z "$1"
+then
+
+	case "$CI_OS_NAME" in
+		windows*) cmd //c mklink //j t\\.prove "$(cygpath -aw "$cache_dir/.prove")";;
+		*) ln -s "$cache_dir/.prove" t/.prove;;
+	esac
+fi
 
 run_tests=t
 
@@ -43,14 +47,34 @@ pedantic)
 	export DEVOPTS=pedantic
 	run_tests=
 	;;
+sanitize-*)
+	export GIT_TEST_COMMIT_GRAPH=1
+	export GIT_TEST_COMMIT_GRAPH_CHANGED_PATHS=1
+	export GIT_TEST_MULTI_PACK_INDEX=1
+	export GIT_TEST_MULTI_PACK_INDEX_WRITE_BITMAP=1
+	export GIT_TEST_ADD_I_USE_BUILTIN=1
+	export GIT_TEST_WRITE_REV_INDEX=1
+	export GIT_TEST_CHECKOUT_WORKERS=2
+	;;
 esac
 
-group Build make
-if test -n "$run_tests"
+# Any new "test" targets should not go after this "make", but should
+# adjust $MAKE_TARGETS. Otherwise compilation-only targets above will
+# start running tests.
+if test "$1" = --build || test -z "$1"
 then
-	group "Run tests" make test ||
-	handle_failed_tests
+	env
+	group Build make
 fi
-check_unignored_build_artifacts
+if test "$1" = --test || test -z "$1"
+then
+	env
+	cat GIT-BUILD-OPTIONS
+	group "Run Tests" make test ||
+	    handle_failed_tests
+	check_unignored_build_artifacts
+	save_good_tree
+fi
 
-save_good_tree
+
+

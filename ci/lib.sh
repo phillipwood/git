@@ -196,11 +196,14 @@ then
 
 	cache_dir="$HOME/none"
 
-	export GIT_PROVE_OPTS="--timer --jobs 10"
+	export GIT_PROVE_OPTS="--timer --jobs 3"
 	export GIT_TEST_OPTS="--verbose-log -x --github-workflow-markup"
-	MAKEFLAGS="$MAKEFLAGS --jobs=10"
+	MAKEFLAGS="$MAKEFLAGS --jobs=2"
 	test windows != "$CI_OS_NAME" ||
 	GIT_TEST_OPTS="--no-chain-lint --no-bin-wrappers $GIT_TEST_OPTS"
+	case "$jobname" in
+		sanitize-*) GIT_TEST_OPTS="--no-chain-lint --no-bin-wrappers --github-workflow-markup $GIT_TEST_OPTS"
+	esac
 else
 	echo "Could not identify CI type" >&2
 	env >&2
@@ -277,6 +280,22 @@ linux-leaks)
 	export SANITIZE=leak
 	export GIT_TEST_PASSING_SANITIZE_LEAK=true
 	;;
+sanitize-gcc)
+    PACKAGES='gcc libasan libubsan'
+    CC=gcc
+    MAKEFLAGS="$MAKEFLAGS NO_MMAP=1 SANITIZE=address,pointer-compare,pointer-subtract,undefined"
+    export ASAN_OPTIONS=detect_leaks=0:detect_invalid_pointer_pairs=2
+    export TEST_NO_MALLOC_CHECK=1
+    unset developer
+    ;;
+sanitize-clang)
+    PACKAGES=clang
+    CC=clang
+    MAKEFLAGS="$MAKEFLAGS NO_MMAP=1 SANITIZE=address,undefined"
+    export ASAN_OPTIONS=detect_leaks=0:detect_invalid_pointer_pairs=2
+    export TEST_NO_MALLOC_CHECK=1
+    unset developer
+    ;;
 esac
 
 MAKEFLAGS="$MAKEFLAGS CC=${CC:-cc}"

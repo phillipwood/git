@@ -44,6 +44,7 @@ static void zlib_pre_call(git_zstream *s)
 	s->z.avail_out = zlib_buf_cap(s->avail_out);
 }
 
+__attribute__((no_sanitize ("pointer-subtract")))
 static void zlib_post_call(git_zstream *s)
 {
 	unsigned long bytes_consumed;
