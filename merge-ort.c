@@ -37,6 +37,7 @@
 #include "tree.h"
 #include "unpack-trees.h"
 #include "xdiff-interface.h"
+#include <stddef.h>
 
 /*
  * We have many arrays of size 3.  Whenever we have such an array, the
@@ -3950,13 +3951,14 @@ static void process_entry(struct merge_options *opt,
 static void prefetch_for_content_merges(struct merge_options *opt,
 					struct string_list *plist)
 {
-	struct string_list_item *e;
 	struct oid_array to_fetch = OID_ARRAY_INIT;
+	size_t i;
 
 	if (opt->repo != the_repository || !has_promisor_remote())
 		return;
 
-	for (e = &plist->items[plist->nr-1]; e >= plist->items; --e) {
+	for (i = plist->nr; i; i--) {
+		struct string_list_item *e = &plist->items[i - 1];
 		/* char *path = e->string; */
 		struct conflict_info *ci = e->util;
 		int i;
@@ -4001,10 +4003,10 @@ static void process_entries(struct merge_options *opt,
 	struct hashmap_iter iter;
 	struct strmap_entry *e;
 	struct string_list plist = STRING_LIST_INIT_NODUP;
-	struct string_list_item *entry;
 	struct directory_versions dir_metadata = { STRING_LIST_INIT_NODUP,
 						   STRING_LIST_INIT_NODUP,
 						   NULL, 0 };
+	size_t i;
 
 	trace2_region_enter("merge", "process_entries setup", opt->repo);
 	if (strmap_empty(&opt->priv->paths)) {
@@ -4042,7 +4044,8 @@ static void process_entries(struct merge_options *opt,
 	 */
 	trace2_region_enter("merge", "processing", opt->repo);
 	prefetch_for_content_merges(opt, &plist);
-	for (entry = &plist.items[plist.nr-1]; entry >= plist.items; --entry) {
+	for (i = plist.nr; i; i--) {
+		struct string_list_item *entry = &plist.items[i - 1];
 		char *path = entry->string;
 		/*
 		 * NOTE: mi may actually be a pointer to a conflict_info, but
