@@ -1110,6 +1110,7 @@ static int peel_onion(struct repository *r, const char *name, int len,
 	const char *sp;
 	unsigned int expected_type = 0;
 	struct object *o;
+	size_t i;
 
 	/*
 	 * "ref^{type}" dereferences ref repeatedly until you cannot
@@ -1122,15 +1123,15 @@ static int peel_onion(struct repository *r, const char *name, int len,
 	if (len < 4 || name[len-1] != '}')
 		return -1;
 
-	for (sp = name + len - 1; name <= sp; sp--) {
-		int ch = *sp;
-		if (ch == '{' && name < sp && sp[-1] == '^')
+	for (i = len; i; i--) {
+		int ch = name[i - 1];
+		if (ch == '{' && i > 1 && name[i - 2] == '^')
 			break;
 	}
-	if (sp <= name)
+	if (!i)
 		return -1;
 
-	sp++; /* beginning of type name, or closing brace for empty */
+	sp = &name[i]; /* beginning of type name, or closing brace for empty */
 	if (starts_with(sp, "commit}"))
 		expected_type = OBJ_COMMIT;
 	else if (starts_with(sp, "tag}"))
@@ -1204,20 +1205,19 @@ static int get_describe_name(struct repository *r,
 			     const char *name, int len,
 			     struct object_id *oid)
 {
-	const char *cp;
+	size_t i;
 	unsigned flags = GET_OID_QUIETLY | GET_OID_COMMIT;
 
-	for (cp = name + len - 1; name + 2 <= cp; cp--) {
-		char ch = *cp;
+	for (i = len; i > 2; i--) {
+		char ch = name[i - 1];
 		if (!isxdigit(ch)) {
 			/* We must be looking at g in "SOMETHING-g"
 			 * for it to be describe output.
 			 */
-			if (ch == 'g' && cp[-1] == '-') {
-				cp++;
-				len -= cp - name;
+			if (ch == 'g' && name[i - 2] == '-') {
+				len -= i;
 				return get_short_oid(r,
-						     cp, len, oid, flags);
+						     &name[i], len, oid, flags);
 			}
 		}
 	}
@@ -1230,14 +1230,14 @@ static enum get_oid_result get_oid_1(struct repository *r,
 				     unsigned lookup_flags)
 {
 	int ret, has_suffix;
-	const char *cp;
+	size_t i;
 
 	/*
 	 * "name~3" is "name^^^", "name~" is "name~1", and "name^" is "name^1".
 	 */
 	has_suffix = 0;
-	for (cp = name + len - 1; name <= cp; cp--) {
-		int ch = *cp;
+	for (i = len; i; i--) {
+		int ch = name[i - 1];
 		if ('0' <= ch && ch <= '9')
 			continue;
 		if (ch == '~' || ch == '^')
@@ -1247,10 +1247,9 @@ static enum get_oid_result get_oid_1(struct repository *r,
 
 	if (has_suffix) {
 		unsigned int num = 0;
-		int len1 = cp - name;
-		cp++;
-		while (cp < name + len) {
-			unsigned int digit = *cp++ - '0';
+		int len1 = i - 1;
+		while (i < len) {
+			unsigned int digit = name[i++] - '0';
 			if (unsigned_mult_overflows(num, 10))
 				return MISSING_OBJECT;
 			num *= 10;
