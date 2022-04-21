@@ -2402,6 +2402,7 @@ static void pprint_rename(struct strbuf *name, const char *a, const char *b)
 	int a_midlen, b_midlen;
 	int qlen_a = quote_c_style(a, NULL, NULL, 0);
 	int qlen_b = quote_c_style(b, NULL, NULL, 0);
+	int i, j;
 
 	if (qlen_a || qlen_b) {
 		quote_c_style(a, name, NULL, 0);
@@ -2420,8 +2421,8 @@ static void pprint_rename(struct strbuf *name, const char *a, const char *b)
 	}
 
 	/* Find common suffix */
-	old_name = a + len_a;
-	new_name = b + len_b;
+	i = len_a - 1;
+	j = len_b - 1;
 	sfx_length = 0;
 	/*
 	 * If there is a common prefix, it must end in a slash.  In
@@ -2432,13 +2433,13 @@ static void pprint_rename(struct strbuf *name, const char *a, const char *b)
 	 * underrun the input strings.
 	 */
 	pfx_adjust_for_slash = (pfx_length ? 1 : 0);
-	while (a + pfx_length - pfx_adjust_for_slash <= old_name &&
-	       b + pfx_length - pfx_adjust_for_slash <= new_name &&
-	       *old_name == *new_name) {
-		if (*old_name == '/')
-			sfx_length = len_a - (old_name - a);
-		old_name--;
-		new_name--;
+	while (pfx_length - pfx_adjust_for_slash <= i &&
+	       pfx_length - pfx_adjust_for_slash <= j &&
+	       a[i] == b[j]) {
+		if (a[i] == '/')
+			sfx_length = len_a - i;
+		i--;
+		j--;
 	}
 
 	/*
