@@ -1182,9 +1182,9 @@ int normalize_path_copy_len(char *dst, const char *src, int *prefix_len)
 		 * dst0..dst is prefix portion, and dst[-1] is '/';
 		 * go up one level.
 		 */
-		dst--;	/* go to trailing '/' */
-		if (dst <= dst0)
+		if (dst <= dst0 + 1)
 			return -1;
+		dst--;	/* go to trailing '/' */
 		/* Windows: dst[-1] cannot be backslash anymore */
 		while (dst0 < dst && dst[-1] != '/')
 			dst--;
