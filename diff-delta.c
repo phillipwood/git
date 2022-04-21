@@ -180,20 +180,21 @@ struct delta_index * create_delta_index(const void *buf, unsigned long bufsize)
 
 	/* then populate the index */
 	prev_val = ~0;
-	for (data = buffer + entries * RABIN_WINDOW - RABIN_WINDOW;
-	     data >= buffer;
+	for (data = buffer + entries * RABIN_WINDOW;
+	     data > buffer;
 	     data -= RABIN_WINDOW) {
+		int j;
 		unsigned int val = 0;
-		for (i = 1; i <= RABIN_WINDOW; i++)
-			val = ((val << 8) | data[i]) ^ T[val >> RABIN_SHIFT];
+		for (j = 1 - RABIN_WINDOW; j <= 0; j++)
+			val = ((val << 8) | data[j]) ^ T[val >> RABIN_SHIFT];
 		if (val == prev_val) {
 			/* keep the lowest of consecutive identical blocks */
-			entry[-1].entry.ptr = data + RABIN_WINDOW;
+			entry[-1].entry.ptr = data;
 			--entries;
 		} else {
 			prev_val = val;
 			i = val & hmask;
-			entry->entry.ptr = data + RABIN_WINDOW;
+			entry->entry.ptr = data;
 			entry->entry.val = val;
 			entry->next = hash[i];
 			hash[i] = entry++;
