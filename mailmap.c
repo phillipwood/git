@@ -134,13 +134,13 @@ static char *parse_name_and_email(char *buffer, char **name,
 	nstart = buffer;
 	while (isspace(*nstart) && nstart < left)
 		++nstart;
-	nend = left-1;
-	while (nend > nstart && isspace(*nend))
+	nend = left;
+	while (nend > nstart && isspace(*(nend - 1)))
 		--nend;
 
-	*name = (nstart <= nend ? nstart : NULL);
+	*name = (nstart < nend ? nstart : NULL);
 	*email = left+1;
-	*(nend+1) = '\0';
+	*nend = '\0';
 	*right++ = '\0';
 
 	return (*right == '\0' ? NULL : right);
