@@ -275,7 +275,7 @@ static int compare_info(const void *a_, const void *b_)
 	/* then it does not matter but at least keep the comparison stable */
 	if ((*a)->p == (*b)->p)
 		return 0;
-	else if ((*a)->p < (*b)->p)
+	else if ((uintmax_t)((*a)->p) < (uintmax_t)((*b)->p))
 		return -1;
 	else
 		return 1;

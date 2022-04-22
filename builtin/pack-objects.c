@@ -2108,9 +2108,9 @@ static int pack_offset_sort(const void *_a, const void *_b)
 	if (!a_in_pack && !b_in_pack)
 		return oidcmp(&a->idx.oid, &b->idx.oid);
 
-	if (a_in_pack < b_in_pack)
+	if ((uintmax_t)a_in_pack < (uintmax_t)b_in_pack)
 		return -1;
-	if (a_in_pack > b_in_pack)
+	if ((uintmax_t)a_in_pack > (uintmax_t)b_in_pack)
 		return 1;
 	return a->in_pack_offset < b->in_pack_offset ? -1 :
 			(a->in_pack_offset > b->in_pack_offset);
