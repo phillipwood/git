@@ -187,7 +187,7 @@ int parse_tag_buffer(struct repository *r, struct tag *item, const void *data, u
 			     oid_to_hex(&oid),
 			     oid_to_hex(&item->object.oid));
 
-	if (bufptr + 4 < tail && starts_with(bufptr, "tag "))
+	if (tail - bufptr > 4 && starts_with(bufptr, "tag "))
 		; 		/* good */
 	else
 		return -1;
@@ -198,7 +198,7 @@ int parse_tag_buffer(struct repository *r, struct tag *item, const void *data, u
 	item->tag = xmemdupz(bufptr, nl - bufptr);
 	bufptr = nl + 1;
 
-	if (bufptr + 7 < tail && starts_with(bufptr, "tagger "))
+	if (tail - bufptr > 7 && starts_with(bufptr, "tagger "))
 		item->date = parse_tag_date(bufptr, tail);
 	else
 		item->date = 0;
