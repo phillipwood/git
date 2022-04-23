@@ -400,7 +400,7 @@ __extension__								\
 __extension__								\
 ({ struct obstack *__o = (OBSTACK);					\
    void *__obj = (OBJ);							\
-   if (__obj > (void *)__o->chunk && __obj < (void *)__o->chunk_limit)  \
+   if (__obj && __obj > (void *)__o->chunk && __obj < (void *)__o->chunk_limit)  \
      __o->next_free = __o->object_base = (char *)__obj;			\
    else (obstack_free) (__o, __obj); })
 
