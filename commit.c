@@ -431,7 +431,7 @@ int parse_commit_buffer(struct repository *r, struct commit *item, const void *b
 	item->parents = NULL;
 
 	tail += size;
-	if (tail <= bufptr + tree_entry_len + 1 || memcmp(bufptr, "tree ", 5) ||
+	if (size <= tree_entry_len + 1 || memcmp(bufptr, "tree ", 5) ||
 			bufptr[tree_entry_len] != '\n')
 		return error("bogus commit object %s", oid_to_hex(&item->object.oid));
 	if (get_oid_hex(bufptr + 5, &parent) < 0)
@@ -449,10 +449,10 @@ int parse_commit_buffer(struct repository *r, struct commit *item, const void *b
 	graft = lookup_commit_graft(r, &item->object.oid);
 	if (graft)
 		r->parsed_objects->substituted_parent = 1;
-	while (bufptr + parent_entry_len < tail && !memcmp(bufptr, "parent ", 7)) {
+	while (tail - bufptr > parent_entry_len && !memcmp(bufptr, "parent ", 7)) {
 		struct commit *new_parent;
 
-		if (tail <= bufptr + parent_entry_len + 1 ||
+		if (tail - bufptr <= parent_entry_len + 1 ||
 		    get_oid_hex(bufptr + 7, &parent) ||
 		    bufptr[parent_entry_len] != '\n')
 			return error("bad parents in commit %s", oid_to_hex(&item->object.oid));
