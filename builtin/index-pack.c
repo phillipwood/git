@@ -1625,7 +1625,7 @@ static void read_v2_anomalous_offsets(struct packed_git *p,
 		if (!(off & 0x80000000))
 			continue;
 		off = off & 0x7fffffff;
-		check_pack_index_ptr(p, &idx2[off * 2]);
+		check_pack_index_offset(p, off);
 		if (idx2[off * 2])
 			continue;
 		/*

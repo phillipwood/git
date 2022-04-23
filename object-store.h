@@ -104,6 +104,8 @@ struct packed_git {
 	size_t index_size;
 	size_t crc_offset;
 	uint32_t num_objects;
+	/* The number of entries in the 8-byte offset table in v2 index */
+	uint32_t num_64bit_offsets;
 	struct oidset bad_objects;
 	int index_version;
 	time_t mtime;

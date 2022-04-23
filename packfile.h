@@ -111,7 +111,7 @@ void unlink_pack_path(const char *pack_name, int force_delete);
  * (like the 64-bit extended offset table), as we compare the size to the
  * fixed-length parts when we open the file.
  */
-void check_pack_index_ptr(const struct packed_git *p, const void *ptr);
+void check_pack_index_offset(const struct packed_git *p, uint32_t offset);
 
 /*
  * Perform binary search on a pack-index for a given oid. Packfile is expected to
