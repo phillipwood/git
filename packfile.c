@@ -178,7 +178,7 @@ int load_idx(const char *path, const unsigned int hashsz, void *idx_map,
 		     */
 		    (sizeof(off_t) <= 4))
 			return error("pack too large for current definition of off_t in %s", path);
-		p->crc_offset = 8 + 4 * 256 + nr * hashsz;
+		p->crc_offset = 8 + 4 * 256 + (size_t)nr * hashsz;
 	}
 
 	p->index_version = version;
