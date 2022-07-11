@@ -2629,10 +2629,17 @@ static int parse_insn_line(struct repository *r, struct todo_item *item,
 		error(_("could not parse '%s'"), bol); /* return later */
 	*end_of_object_name = saved;
 
-	bol = end_of_object_name + strspn(end_of_object_name, " \t");
-	item->arg_offset = bol - buf;
-	item->arg_len = (int)(eol - bol);
-
+	if (item->command != TODO_MERGE) {
+		bol = find_start_of_comment(end_of_object_name, eol);
+		if (bol) {
+			item->comment_offset = bol - buf;
+			item->comment_len = (int)(eol - bol);
+		}
+	} else {
+		bol = end_of_object_name + strspn(end_of_object_name, " \t");
+		item->arg_offset = bol - buf;
+		item->arg_len = (int)(eol - bol);
+	}
 	if (status < 0)
 		return status;
 
