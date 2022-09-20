@@ -6170,6 +6170,25 @@ static int skip_fixupish(const char *subject, const char **p) {
 	       skip_prefix(subject, "squash! ", p);
 }
 
+static int is_fixup_oid(const char *p, struct commit_todo_item *commit_todo,
+			struct todo_item** item_p)
+{
+	struct todo_item *item;
+	struct commit *commit;
+
+	if (strchr(p, ' '))
+		return 0;
+	commit = lookup_commit_reference_by_name(p);
+	if (!commit)
+		return 0;
+	item = *commit_todo_item_at(commit_todo, commit);
+	if (!item)
+		return 0;
+
+	*item_p = item;
+	return 1;
+}
+
 /*
  * Rearrange the todo list that has both "pick commit-id msg" and "pick
  * commit-id fixup!/squash! msg" in it so that the latter is put immediately
@@ -6227,7 +6246,7 @@ int todo_list_rearrange_squash(struct todo_list *todo_list)
 		subject = subjects[i] = strbuf_detach(&buf, &subject_len);
 		unuse_commit_buffer(item->commit, commit_buffer);
 		if (skip_fixupish(subject, &p)) {
-			struct commit *commit2;
+			struct todo_item *item2;
 
 			for (;;) {
 				while (isspace(*p))
@@ -6243,13 +6262,9 @@ int todo_list_rearrange_squash(struct todo_list *todo_list)
 			if (entry)
 				/* found by title */
 				i2 = entry->i;
-			else if (!strchr(p, ' ') &&
-				 (commit2 =
-				  lookup_commit_reference_by_name(p)) &&
-				 *commit_todo_item_at(&commit_todo, commit2))
+			else if (is_fixup_oid(p, &commit_todo, &item2))
 				/* found by commit name */
-				i2 = *commit_todo_item_at(&commit_todo, commit2)
-					- todo_list->items;
+				i2 = item2 - todo_list->items;
 			else {
 				/* copy can be a prefix of the commit subject */
 				for (i2 = 0; i2 < i; i2++)
