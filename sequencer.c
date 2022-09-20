@@ -6071,7 +6071,7 @@ int complete_action(struct repository *r, struct replay_opts *opts, unsigned fla
 	if (update_refs && todo_list_add_update_ref_commands(todo_list))
 		return -1;
 
-	if (autosquash && todo_list_rearrange_squash(todo_list))
+	if (autosquash && todo_list_rearrange_squash(r, todo_list))
 		return -1;
 
 	if (commands->nr)
@@ -6170,15 +6170,19 @@ static int skip_fixupish(const char *subject, const char **p) {
 	       skip_prefix(subject, "squash! ", p);
 }
 
-static int is_fixup_oid(const char *p, struct commit_todo_item *commit_todo,
+static int is_fixup_oid(struct repository *r, const char *p,
+			struct commit_todo_item *commit_todo,
 			struct todo_item** item_p)
 {
 	struct todo_item *item;
 	struct commit *commit;
+	struct object_id oid;
 
 	if (strchr(p, ' '))
 		return 0;
-	commit = lookup_commit_reference_by_name(p);
+	if (repo_get_oid(r, p, &oid) || !starts_with(oid_to_hex(&oid), p))
+		return 0;
+	commit = lookup_commit_reference(r, &oid);
 	if (!commit)
 		return 0;
 	item = *commit_todo_item_at(commit_todo, commit);
@@ -6198,7 +6202,7 @@ static int is_fixup_oid(const char *p, struct commit_todo_item *commit_todo,
  * message will have to be retrieved from the commit (as the oneline in the
  * script cannot be trusted) in order to normalize the autosquash arrangement.
  */
-int todo_list_rearrange_squash(struct todo_list *todo_list)
+int todo_list_rearrange_squash(struct repository *r, struct todo_list *todo_list)
 {
 	struct hashmap subject2item;
 	int rearranged = 0, *next, *tail, i, nr = 0, alloc = 0;
@@ -6262,8 +6266,8 @@ int todo_list_rearrange_squash(struct todo_list *todo_list)
 			if (entry)
 				/* found by title */
 				i2 = entry->i;
-			else if (is_fixup_oid(p, &commit_todo, &item2))
-				/* found by commit name */
+			else if (is_fixup_oid(r, p, &commit_todo, &item2))
+				/* found by commit oid */
 				i2 = item2 - todo_list->items;
 			else {
 				/* copy can be a prefix of the commit subject */

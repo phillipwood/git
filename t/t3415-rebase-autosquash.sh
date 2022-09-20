@@ -245,6 +245,19 @@ test_expect_success 'auto squash of fixup commit that matches branch name which 
 	test_cmp expect actual
 '
 
+test_expect_success 'auto squash rejects fixup commit with ref name' '
+	git reset --hard base &&
+	git commit --allow-empty -m "fixup! first-commit" &&
+	GIT_SEQUENCE_EDITOR="cat >tmp" git rebase --autosquash -i first-commit^ &&
+	sed -ne "/^[^#]/{s/[0-9a-f]\{7,\}/HASH/g;p;}" tmp >actual &&
+	cat <<-EOF >expect &&
+	pick HASH first commit
+	pick HASH second commit
+	pick HASH fixup! first-commit # empty
+	EOF
+	test_cmp expect actual
+'
+
 test_auto_commit_flags () {
 	git reset --hard base &&
 	echo 1 >file1 &&
