@@ -3789,11 +3789,17 @@ cleanup:
 static struct commit *lookup_label(const char *label, int len,
 				   struct strbuf *buf)
 {
-	struct commit *commit;
+	struct commit *commit = NULL;
+	struct object_id oid;
 
 	strbuf_reset(buf);
 	strbuf_addf(buf, "refs/rewritten/%.*s", len, label);
-	commit = lookup_commit_reference_by_name(buf->buf);
+	/*
+	 * Use read_ref() to avoid dwim behavior of
+	 * lookup_commit_reference_by_name()
+	 */
+	if (!read_ref (buf->buf, &oid))
+		commit = lookup_commit_reference(the_repository, &oid);
 	if (!commit) {
 		/* fall back to non-rewritten ref or commit */
 		strbuf_splice(buf, 0, strlen("refs/rewritten/"), "", 0);
