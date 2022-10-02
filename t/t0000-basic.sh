@@ -190,6 +190,14 @@ test_expect_success 'subtest: test_todo allowed arguments' '
 		"test_todo test_must_fail git --version"
 	test_expect_success "test_todo test_must_fail rejects bad command" \
 		"test_todo test_must_fail test_true"
+	test_expect_success "test_todo accepts grep" \
+		"echo a >a && test_todo grep b <a"
+	test_expect_success "test_todo accepts ! grep" \
+		"echo a >a && test_todo ! grep -v b <a"
+	test_expect_success "test_todo detects grep errors" \
+		"echo a >a && test_todo grep --invalid-option b <a"
+	test_expect_success "test_todo detects ! grep errors" \
+		"echo a >a && test_todo ! grep --invalid-option -v b <a"
 	test_done
 	EOF
 	check_sub_test_lib_test acceptable-test-todo <<-\EOF
@@ -199,9 +207,15 @@ test_expect_success 'subtest: test_todo allowed arguments' '
 	> not ok 3 - test_todo test_must_fail accepts good command # TODO known breakage
 	> not ok 4 - test_todo test_must_fail rejects bad command
 	> #	test_todo test_must_fail test_true
-	> # still have 2 known breakage(s)
-	> # failed 2 among remaining 2 test(s)
-	> 1..4
+	> not ok 5 - test_todo accepts grep # TODO known breakage
+	> not ok 6 - test_todo accepts ! grep # TODO known breakage
+	> not ok 7 - test_todo detects grep errors
+	> #	echo a >a && test_todo grep --invalid-option b <a
+	> not ok 8 - test_todo detects ! grep errors
+	> #	echo a >a && test_todo ! grep --invalid-option -v b <a
+	> # still have 4 known breakage(s)
+	> # failed 4 among remaining 4 test(s)
+	> 1..8
 	EOF
 '
 
