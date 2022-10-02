@@ -198,6 +198,14 @@ test_expect_success 'subtest: test_todo allowed arguments' '
 		"echo a >a && test_todo grep --invalid-option b <a"
 	test_expect_success "test_todo detects ! grep errors" \
 		"echo a >a && test_todo ! grep --invalid-option -v b <a"
+	test_expect_success "test_todo accepts test" \
+		"test_todo test -z a"
+	test_expect_success "test_todo detects test errors" \
+		"test_todo test a ==== b"
+	test_expect_success "test_todo skips verbose and accepts good command" \
+		"test_todo verbose test -z a"
+	test_expect_success "test_todo skips verbose and rejects bad command" \
+		"test_todo verbose false"
 	test_done
 	EOF
 	check_sub_test_lib_test acceptable-test-todo <<-\EOF
@@ -213,9 +221,15 @@ test_expect_success 'subtest: test_todo allowed arguments' '
 	> #	echo a >a && test_todo grep --invalid-option b <a
 	> not ok 8 - test_todo detects ! grep errors
 	> #	echo a >a && test_todo ! grep --invalid-option -v b <a
-	> # still have 4 known breakage(s)
-	> # failed 4 among remaining 4 test(s)
-	> 1..8
+	> not ok 9 - test_todo accepts test # TODO known breakage
+	> not ok 10 - test_todo detects test errors
+	> #	test_todo test a ==== b
+	> not ok 11 - test_todo skips verbose and accepts good command # TODO known breakage
+	> not ok 12 - test_todo skips verbose and rejects bad command
+	> #	test_todo verbose false
+	> # still have 6 known breakage(s)
+	> # failed 6 among remaining 6 test(s)
+	> 1..12
 	EOF
 '
 

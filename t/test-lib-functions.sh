@@ -1016,6 +1016,11 @@ test_must_fail_acceptable () {
 	name="$1"
 	shift
 
+	if test "$name" = "todo" && test "$1" = "verbose"
+	then
+		shift
+	fi
+
 	if test "$1" = "env"
 	then
 		shift
@@ -1048,7 +1053,7 @@ test_must_fail_acceptable () {
 		fi
 		return 1
 		;;
-	grep|test_*)
+	grep|test|test_*)
 		if test "$name" = "todo"
 		then
 			test_todo_command_="$1"
@@ -1130,7 +1135,7 @@ test_must_fail_helper () {
 		return 1
 	else
 		case "$test_todo_command_" in
-		grep)
+		grep|test)
 			if test $exit_code -ne 1
 			then
 			       echo >&4 "test_todo: $test_todo_command_ error: $*"
