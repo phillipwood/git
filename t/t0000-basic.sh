@@ -141,6 +141,70 @@ test_expect_success 'subtest: a passing TODO test' '
 	EOF
 '
 
+test_expect_success 'subtest: a failing test_todo' '
+	write_and_run_sub_test_lib_test failing-test-todo <<-\EOF &&
+	test_false () {
+		false
+	}
+	test_expect_success "passing test" "true"
+	test_expect_success "known todo" "test_todo test_false"
+	test_done
+	EOF
+	check_sub_test_lib_test failing-test-todo <<-\EOF
+	> ok 1 - passing test
+	> not ok 2 - known todo # TODO known breakage
+	> # still have 1 known breakage(s)
+	> # passed all remaining 1 test(s)
+	> 1..2
+	EOF
+'
+
+test_expect_success 'subtest: a passing test_todo' '
+	write_and_run_sub_test_lib_test_err passing-test-todo <<-\EOF &&
+	test_true () {
+		true
+	}
+	test_expect_success "pretend we have fixed a test_todo breakage" \
+		"test_todo test_true"
+	test_done
+	EOF
+	check_sub_test_lib_test passing-test-todo <<-\EOF
+	> not ok 1 - pretend we have fixed a test_todo breakage
+	> #	test_todo test_true
+	> # failed 1 among 1 test(s)
+	> 1..1
+	EOF
+'
+
+test_expect_success 'subtest: test_todo allowed arguments' '
+	write_and_run_sub_test_lib_test_err acceptable-test-todo <<-\EOF &&
+	# This an acceptable command for test_todo but not test_must_fail
+	test_true () {
+		  return 0
+	}
+	test_expect_success "test_todo skips env and accepts good command" \
+		"test_todo env Var=Value git --invalid-option"
+	test_expect_success "test_todo skips env and rejects bad command" \
+		"test_todo env Var=Value false"
+	test_expect_success "test_todo test_must_fail accepts good command" \
+		"test_todo test_must_fail git --version"
+	test_expect_success "test_todo test_must_fail rejects bad command" \
+		"test_todo test_must_fail test_true"
+	test_done
+	EOF
+	check_sub_test_lib_test acceptable-test-todo <<-\EOF
+	> not ok 1 - test_todo skips env and accepts good command # TODO known breakage
+	> not ok 2 - test_todo skips env and rejects bad command
+	> #	test_todo env Var=Value false
+	> not ok 3 - test_todo test_must_fail accepts good command # TODO known breakage
+	> not ok 4 - test_todo test_must_fail rejects bad command
+	> #	test_todo test_must_fail test_true
+	> # still have 2 known breakage(s)
+	> # failed 2 among remaining 2 test(s)
+	> 1..4
+	EOF
+'
+
 test_expect_success 'subtest: 2 TODO tests, one passin' '
 	write_and_run_sub_test_lib_test partially-passing-todos <<-\EOF &&
 	test_expect_failure "pretend we have a known breakage" "false"
