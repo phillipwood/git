@@ -2540,12 +2540,21 @@ static int parse_insn_line(struct repository *r, struct todo_item *item,
 	padding = strspn(bol, " \t");
 	bol += padding;
 
-	if (item->command == TODO_NOOP || item->command == TODO_BREAK) {
+	if (item->command == TODO_NOOP) {
 		if (bol != eol)
 			return error(_("%s does not accept arguments: '%s'"),
 				     command_to_string(item->command), bol);
 		item->arg_offset = bol - buf;
 		item->arg_len = eol - bol;
+		return 0;
+	}
+
+	if (item->command == TODO_BREAK) {
+		bol = find_start_of_comment(bol, eol);
+		if (bol) {
+			item->comment_offset = bol - buf;
+			item->comment_len = (int)(eol - bol);
+		}
 		return 0;
 	}
 
@@ -4702,6 +4711,11 @@ static int pick_commits(struct repository *r,
 			if (item->command == TODO_BREAK) {
 				if (!opts->verbose)
 					term_clear_line();
+				if (item->comment_len)
+					fprintf(stdout, "break: %.*s\n",
+						item->comment_len,
+						todo_item_get_comment(todo_list,
+								      item));
 				return stopped_at_head(r);
 			}
 		}

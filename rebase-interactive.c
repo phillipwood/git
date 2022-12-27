@@ -53,7 +53,7 @@ void append_todo_help(int command_count,
 "d, drop <commit> = remove commit\n"
 "l, label <label> = label current HEAD with a name\n"
 "t, reset <label> = reset HEAD to a label\n"
-"m, merge [-C <commit> | -c <commit>] <label> [# <oneline>]\n"
+"m, merge [-C <commit> | -c <commit>] <label>\n"
 "        create a merge commit using the original merge commit's\n"
 "        message (or the oneline, if no original merge commit was\n"
 "        specified); use -c <commit> to reword the commit message\n"
@@ -61,6 +61,7 @@ void append_todo_help(int command_count,
 "                      to this position in the new commits. The <ref> is\n"
 "                      updated at the end of the rebase\n"
 "\n"
+"All commands may be followed by a comment starting with '#'\n"
 "These lines can be re-ordered; they are executed from top to bottom.\n");
 	unsigned edit_todo = !(shortrevisions && shortonto);
 
