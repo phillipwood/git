@@ -2891,55 +2891,11 @@ void parse_strategy_opts(struct replay_opts *opts, char *raw_opts)
 	}
 }
 
-static void read_strategy_opts(struct replay_opts *opts, struct strbuf *buf)
-{
-	strbuf_reset(buf);
-	if (!read_oneliner(buf, rebase_path_strategy(), 0))
-		return;
-	free(opts->strategy);
-	opts->strategy = strbuf_detach(buf, NULL);
-	if (!read_oneliner(buf, rebase_path_strategy_opts(), 0))
-		return;
-
-	parse_strategy_opts(opts, buf->buf);
-}
-
 static int read_populate_opts(struct replay_opts *opts)
 {
 	if (is_rebase_i(opts)) {
 		struct strbuf buf = STRBUF_INIT;
 		int ret = 0;
-
-		if (read_oneliner(&buf, rebase_path_gpg_sign_opt(),
-				  READ_ONELINER_SKIP_IF_EMPTY)) {
-			if (!starts_with(buf.buf, "-S"))
-				strbuf_reset(&buf);
-			else {
-				free(opts->gpg_sign);
-				opts->gpg_sign = xstrdup(buf.buf + 2);
-			}
-			strbuf_reset(&buf);
-		}
-
-		if (read_oneliner(&buf, rebase_path_allow_rerere_autoupdate(),
-				  READ_ONELINER_SKIP_IF_EMPTY)) {
-			if (!strcmp(buf.buf, "--rerere-autoupdate"))
-				opts->allow_rerere_auto = RERERE_AUTOUPDATE;
-			else if (!strcmp(buf.buf, "--no-rerere-autoupdate"))
-				opts->allow_rerere_auto = RERERE_NOAUTOUPDATE;
-			strbuf_reset(&buf);
-		}
-
-		if (file_exists(rebase_path_verbose()))
-			opts->verbose = 1;
-
-		if (file_exists(rebase_path_quiet()))
-			opts->quiet = 1;
-
-		if (file_exists(rebase_path_signoff())) {
-			opts->allow_ff = 0;
-			opts->signoff = 1;
-		}
 
 		if (file_exists(rebase_path_cdate_is_adate())) {
 			opts->allow_ff = 0;
@@ -2961,9 +2917,6 @@ static int read_populate_opts(struct replay_opts *opts)
 
 		if (file_exists(rebase_path_keep_redundant_commits()))
 			opts->keep_redundant_commits = 1;
-
-		read_strategy_opts(opts, &buf);
-		strbuf_reset(&buf);
 
 		if (read_oneliner(&opts->current_fixups,
 				  rebase_path_current_fixups(),
