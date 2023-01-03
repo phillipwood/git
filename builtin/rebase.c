@@ -157,7 +157,10 @@ static struct replay_opts get_replay_opts(const struct rebase_options *opts)
 	replay.committer_date_is_author_date =
 					opts->committer_date_is_author_date;
 	replay.ignore_date = opts->ignore_date;
-	replay.gpg_sign = xstrdup_or_null(opts->gpg_sign_opt);
+	/* remove the leading "-S" if opts->gpg_sign_opt is set */
+	replay.gpg_sign = opts->gpg_sign_opt ? xstrdup(opts->gpg_sign_opt + 2)
+					     : NULL;
+
 	replay.reflog_action = xstrdup(opts->reflog_action);
 	if (opts->strategy)
 		replay.strategy = xstrdup_or_null(opts->strategy);
@@ -742,12 +745,6 @@ static int run_specific_rebase(struct rebase_options *opts)
 		if (!(opts->flags & REBASE_INTERACTIVE_EXPLICIT)) {
 			setenv("GIT_SEQUENCE_EDITOR", ":", 1);
 			opts->autosquash = 0;
-		}
-		if (opts->gpg_sign_opt) {
-			/* remove the leading "-S" */
-			char *tmp = xstrdup(opts->gpg_sign_opt + 2);
-			free(opts->gpg_sign_opt);
-			opts->gpg_sign_opt = tmp;
 		}
 
 		status = run_sequencer_rebase(opts);
