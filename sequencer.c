@@ -163,6 +163,11 @@ static char *rebase_path_update_refs(const char *wt_git_dir)
 }
 
 /*
+ * This file exists for compatibility with older git versions
+ */
+static GIT_PATH_FUNC(rebase_path_interactive, "rebase-merge/interactive")
+
+/*
  * The following files are written by git-rebase just after parsing the
  * command-line.
  */
@@ -2971,6 +2976,7 @@ static void write_strategy_opts(struct replay_opts *opts)
 int write_basic_state(struct replay_opts *opts, const char *head_name,
 		      struct commit *onto, const struct object_id *orig_head)
 {
+	write_file(rebase_path_interactive(), "%s", "");
 	if (head_name)
 		write_file(rebase_path_head_name(), "%s\n", head_name);
 	if (onto)
@@ -3010,6 +3016,10 @@ int write_basic_state(struct replay_opts *opts, const char *head_name,
 		write_file(rebase_path_reschedule_failed_exec(), "%s", "");
 	else
 		write_file(rebase_path_no_reschedule_failed_exec(), "%s", "");
+
+	if (opts->have_squash_onto)
+		write_file(rebase_path_squash_onto(), "%s\n",
+			   oid_to_hex(&opts->squash_onto));
 
 	return 0;
 }

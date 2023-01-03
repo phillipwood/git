@@ -39,8 +39,6 @@ static char const * const builtin_rebase_usage[] = {
 	NULL
 };
 
-static GIT_PATH_FUNC(path_squash_onto, "rebase-merge/squash-onto")
-static GIT_PATH_FUNC(path_interactive, "rebase-merge/interactive")
 static GIT_PATH_FUNC(apply_dir, "rebase-apply")
 static GIT_PATH_FUNC(merge_dir, "rebase-merge")
 
@@ -231,17 +229,10 @@ static int init_basic_state(struct replay_opts *opts, const char *head_name,
 			    struct commit *onto,
 			    const struct object_id *orig_head)
 {
-	FILE *interactive;
-
 	if (!is_directory(merge_dir()) && mkdir_in_gitdir(merge_dir()))
 		return error_errno(_("could not create temporary %s"), merge_dir());
 
 	delete_reflog("REBASE_HEAD");
-
-	interactive = fopen(path_interactive(), "w");
-	if (!interactive)
-		return error_errno(_("could not mark as interactive"));
-	fclose(interactive);
 
 	return write_basic_state(opts, head_name, onto, orig_head);
 }
@@ -278,10 +269,6 @@ static int do_interactive_rebase(struct rebase_options *opts, unsigned flags)
 
 		return -1;
 	}
-
-	if (!opts->upstream && opts->squash_onto)
-		write_file(path_squash_onto(), "%s\n",
-			   oid_to_hex(opts->squash_onto));
 
 	strvec_pushl(&make_script_args, "", revisions, NULL);
 	if (opts->restrict_revision)
