@@ -225,18 +225,6 @@ static int get_revision_ranges(struct commit *upstream, struct commit *onto,
 	return 0;
 }
 
-static int init_basic_state(struct replay_opts *opts, const char *head_name,
-			    struct commit *onto,
-			    const struct object_id *orig_head)
-{
-	if (!is_directory(merge_dir()) && mkdir_in_gitdir(merge_dir()))
-		return error_errno(_("could not create temporary %s"), merge_dir());
-
-	delete_reflog("REBASE_HEAD");
-
-	return write_basic_state(opts, head_name, onto, orig_head);
-}
-
 static void split_exec_commands(const char *cmd, struct string_list *commands)
 {
 	if (cmd && *cmd) {
@@ -261,7 +249,15 @@ static int do_interactive_rebase(struct rebase_options *opts, unsigned flags)
 				&revisions, &shortrevisions))
 		return -1;
 
-	if (init_basic_state(&replay,
+	if (mkdir_in_gitdir(merge_dir())) {
+		if (errno != EEXIST)
+			return error_errno(_("could not create directory '%s'"),
+					   merge_dir());
+	}
+
+	delete_reflog("REBASE_HEAD");
+
+	if (write_basic_state(&replay,
 			     opts->head_name ? opts->head_name : "detached HEAD",
 			     opts->onto, &opts->orig_head->object.oid)) {
 		free(revisions);
