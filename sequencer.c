@@ -2523,8 +2523,37 @@ static int parse_insn_line(struct repository *r, struct todo_item *item,
 		return error(_("missing arguments for %s"),
 			     command_to_string(item->command));
 
-	if (item->command == TODO_EXEC || item->command == TODO_LABEL ||
+	if (item->command == TODO_LABEL ||
 	    item->command == TODO_RESET || item->command == TODO_UPDATE_REF) {
+		int ret = 0;
+		int arg_len = (int)(eol - bol);
+
+		item->commit = NULL;
+		item->arg_offset = bol - buf;
+		item->arg_len = arg_len;
+		if (item->command != TODO_RESET) {
+			int allow_onelevel = item->command == TODO_UPDATE_REF ?
+				0 : REFNAME_ALLOW_ONELEVEL;
+
+			saved = *eol;
+			*eol = '\0';
+			if ((item->command == TODO_LABEL &&
+			     arg_len == 1 && *bol == '#') ||
+			    check_refname_format(bol, allow_onelevel)) {
+				if (item->command == TODO_LABEL)
+					error(_("'%.*s' is not a valid label"),
+					      arg_len, bol);
+				else
+					error(_("'%.*s' is not a valid ref"),
+					      arg_len, bol);
+				ret = -1;
+			}
+			*eol = saved;
+		}
+		return ret;
+	}
+
+	if (item->command == TODO_EXEC) {
 		item->commit = NULL;
 		item->arg_offset = bol - buf;
 		item->arg_len = (int)(eol - bol);
