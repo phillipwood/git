@@ -2454,8 +2454,7 @@ void todo_list_release(struct todo_list *todo_list)
 
 static struct todo_item *append_new_todo(struct todo_list *todo_list)
 {
-	ALLOC_GROW(todo_list->items, todo_list->nr + 1, todo_list->alloc);
-	todo_list->total_nr++;
+	ALLOC_GROW_BY(todo_list->items, todo_list->total_nr, 1, todo_list->alloc);
 	return todo_list->items + todo_list->nr++;
 }
 
@@ -2491,7 +2490,6 @@ static int parse_insn_line(struct repository *r, struct todo_item *item,
 
 	if (bol == eol || *bol == '\r' || *bol == comment_line_char) {
 		item->command = TODO_COMMENT;
-		item->commit = NULL;
 		item->arg_offset = bol - buf;
 		item->arg_len = eol - bol;
 		return 0;
@@ -2513,7 +2511,6 @@ static int parse_insn_line(struct repository *r, struct todo_item *item,
 		if (bol != eol)
 			return error(_("%s does not accept arguments: '%s'"),
 				     command_to_string(item->command), bol);
-		item->commit = NULL;
 		item->arg_offset = bol - buf;
 		item->arg_len = eol - bol;
 		return 0;
@@ -2528,7 +2525,6 @@ static int parse_insn_line(struct repository *r, struct todo_item *item,
 		int ret = 0;
 		int arg_len = (int)(eol - bol);
 
-		item->commit = NULL;
 		item->arg_offset = bol - buf;
 		item->arg_len = arg_len;
 		if (item->command != TODO_RESET) {
@@ -2554,7 +2550,6 @@ static int parse_insn_line(struct repository *r, struct todo_item *item,
 	}
 
 	if (item->command == TODO_EXEC) {
-		item->commit = NULL;
 		item->arg_offset = bol - buf;
 		item->arg_len = (int)(eol - bol);
 		return 0;
@@ -2580,7 +2575,6 @@ static int parse_insn_line(struct repository *r, struct todo_item *item,
 			item->flags |= TODO_EDIT_MERGE_MSG;
 		} else {
 			item->flags |= TODO_EDIT_MERGE_MSG;
-			item->commit = NULL;
 			item->arg_offset = bol - buf;
 			item->arg_len = (int)(eol - bol);
 			return 0;
@@ -2655,10 +2649,10 @@ int todo_list_parse_insn_buffer(struct repository *r, char *buf,
 		if (parse_insn_line(r, item, buf, p, eol)) {
 			res = error(_("invalid line %d: %.*s"),
 				i, (int)(eol - p), p);
+			memset(item, 0, sizeof(*item));
 			item->command = TODO_COMMENT + 1;
 			item->arg_offset = p - buf;
 			item->arg_len = (int)(eol - p);
-			item->commit = NULL;
 		}
 
 		if (fixup_okay)
