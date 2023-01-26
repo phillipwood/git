@@ -114,9 +114,9 @@ struct todo_item {
 	enum todo_command command;
 	struct commit *commit;
 	unsigned int flags;
-	int arg_len;
+	int arg_len, comment_len;
 	/* The offset of the command and its argument in the strbuf */
-	size_t offset_in_buf, arg_offset;
+	size_t offset_in_buf, arg_offset, comment_offset;
 };
 
 struct todo_list {
@@ -138,6 +138,8 @@ int todo_list_write_to_file(struct repository *r, struct todo_list *todo_list,
 void todo_list_release(struct todo_list *todo_list);
 const char *todo_item_get_arg(struct todo_list *todo_list,
 			      struct todo_item *item);
+const char *todo_item_get_comment(struct todo_list *todo_list,
+				  struct todo_item *item);
 
 /*
  * Parse the update-refs file for the current rebase, then remove the

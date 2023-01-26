@@ -186,10 +186,16 @@ int todo_list_check(struct todo_list *old_todo, struct todo_list *new_todo)
 		struct todo_item *item = old_todo->items + i;
 		struct commit *commit = item->commit;
 		if (commit && !*commit_seen_at(&commit_seen, commit)) {
-			strbuf_addf(&missing, " - %s %.*s\n",
-				    find_unique_abbrev(&commit->object.oid, DEFAULT_ABBREV),
-				    item->arg_len,
-				    todo_item_get_arg(old_todo, item));
+			strbuf_addf(&missing, " - %s",
+				    find_unique_abbrev(&commit->object.oid, DEFAULT_ABBREV));
+			if (item->arg_len)
+				strbuf_addf(&missing, " %.*s", item->arg_len,
+					    todo_item_get_arg(old_todo, item));
+			if (item->comment_len)
+				strbuf_addf(&missing, " # %.*s",
+					    item->comment_len,
+					    todo_item_get_comment(old_todo, item));
+			strbuf_addch(&missing, '\n');
 			*commit_seen_at(&commit_seen, commit) = 1;
 		}
 	}

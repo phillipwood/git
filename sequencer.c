@@ -2464,6 +2464,12 @@ const char *todo_item_get_arg(struct todo_list *todo_list,
 	return todo_list->buf.buf + item->arg_offset;
 }
 
+const char *todo_item_get_comment(struct todo_list *todo_list,
+				  struct todo_item *item)
+{
+	return todo_list->buf.buf + item->comment_offset;
+}
+
 static int is_command(enum todo_command command, const char **bol)
 {
 	const char *str = todo_command_info[command].str;
@@ -2474,6 +2480,33 @@ static int is_command(enum todo_command command, const char **bol)
 		((nick && **bol == nick) &&
 		 (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || !*p) &&
 		 (*bol = p));
+}
+
+static const char *find_start_of_comment(const char *p, const char *eol)
+{
+	while (p < eol && isspace(*p))
+		p++;
+
+	if (*p == '#') {
+		p++;
+		while (p < eol && isspace(*p))
+			p++;
+	}
+
+	return p < eol ? p : NULL;
+}
+
+static int get_label_len(const char *name, const char *eol, int is_reset)
+{
+	const char *p = name;
+
+	if (is_reset)
+		skip_prefix(p, "[new root]", &p);
+
+	while (p < eol && !isspace(*p))
+		p++;
+
+	return p - name;
 }
 
 static int parse_insn_line(struct repository *r, struct todo_item *item,
@@ -2523,16 +2556,18 @@ static int parse_insn_line(struct repository *r, struct todo_item *item,
 	if (item->command == TODO_LABEL ||
 	    item->command == TODO_RESET || item->command == TODO_UPDATE_REF) {
 		int ret = 0;
-		int arg_len = (int)(eol - bol);
+		int arg_len = get_label_len(bol, eol,
+					    item->command == TODO_RESET);
 
 		item->arg_offset = bol - buf;
 		item->arg_len = arg_len;
 		if (item->command != TODO_RESET) {
+			char *end_of_arg = (char *)bol + arg_len;
 			int allow_onelevel = item->command == TODO_UPDATE_REF ?
 				0 : REFNAME_ALLOW_ONELEVEL;
 
-			saved = *eol;
-			*eol = '\0';
+			saved = *end_of_arg;
+			*end_of_arg = '\0';
 			if ((item->command == TODO_LABEL &&
 			     arg_len == 1 && *bol == '#') ||
 			    check_refname_format(bol, allow_onelevel)) {
@@ -2544,7 +2579,12 @@ static int parse_insn_line(struct repository *r, struct todo_item *item,
 					      arg_len, bol);
 				ret = -1;
 			}
-			*eol = saved;
+			*end_of_arg = saved;
+		}
+		bol = find_start_of_comment(bol + arg_len, eol);
+		if (bol) {
+			item->comment_offset = bol - buf;
+			item->comment_len = (int)(eol - bol);
 		}
 		return ret;
 	}
@@ -5869,11 +5909,13 @@ static void todo_list_to_strbuf(struct repository *r, struct todo_list *todo_lis
 		}
 
 		/* add all the rest */
-		if (!item->arg_len)
-			strbuf_addch(buf, '\n');
-		else
-			strbuf_addf(buf, " %.*s\n", item->arg_len,
+		if (item->arg_len)
+			strbuf_addf(buf, " %.*s", item->arg_len,
 				    todo_item_get_arg(todo_list, item));
+		if (item->comment_len)
+			strbuf_addf(buf, " # %.*s", item->comment_len,
+				    todo_item_get_comment(todo_list, item));
+		strbuf_addch(buf, '\n');
 	}
 }
 
