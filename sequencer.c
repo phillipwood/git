@@ -2930,7 +2930,7 @@ static void parse_strategy_opts(struct replay_opts *opts, char *raw_opts)
 	count = split_cmdline(strategy_opts_string,
 			      (const char ***)&opts->xopts);
 	if (count < 0)
-		die(_("could not split '%s': %s"), strategy_opts_string,
+		BUG("could not split '%s': %s", strategy_opts_string,
 			    split_cmdline_strerror(count));
 	opts->xopts_nr = count;
 	for (i = 0; i < opts->xopts_nr; i++) {
@@ -3054,12 +3054,27 @@ done_rebase_i:
 
 static void write_strategy_opts(struct replay_opts *opts)
 {
-	int i;
 	struct strbuf buf = STRBUF_INIT;
 
-	for (i = 0; i < opts->xopts_nr; ++i)
-		strbuf_addf(&buf, " --%s", opts->xopts[i]);
+	/*
+	 * Quote strategy options so that they can be read correctly
+	 * by split_cmdline().
+	 */
+	for (size_t i = 0; i < opts->xopts_nr; i++) {
+		char *arg = opts->xopts[i];
 
+		if (i)
+			strbuf_addch(&buf, ' ');
+		strbuf_addch(&buf, '"');
+		for (size_t j = 0; arg[j]; j++) {
+			const char c = arg[j];
+
+			if (c == '"' || c =='\\')
+				strbuf_addch(&buf, '\\');
+			strbuf_addch(&buf, c);
+		}
+		strbuf_addch(&buf, '"');
+	}
 	write_file(rebase_path_strategy_opts(), "%s\n", buf.buf);
 	strbuf_release(&buf);
 }
