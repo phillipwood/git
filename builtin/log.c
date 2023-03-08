@@ -52,6 +52,7 @@ static int decoration_style;
 static int decoration_given;
 static int use_mailmap_config = 1;
 static unsigned int force_in_body_from;
+static int stdout_mboxrd;
 static const char *fmt_patch_subject_prefix = "PATCH";
 static int fmt_patch_name_max = FORMAT_PATCH_NAME_MAX_DEFAULT;
 static const char *fmt_pretty;
@@ -1006,6 +1007,8 @@ static int git_format_config(const char *var, const char *value, void *cb)
 	if (!strcmp(var, "format.attach")) {
 		if (value && *value)
 			default_attach = xstrdup(value);
+		else if (value && !*value)
+			FREE_AND_NULL(default_attach);
 		else
 			default_attach = xstrdup(git_version_string);
 		return 0;
@@ -1075,6 +1078,10 @@ static int git_format_config(const char *var, const char *value, void *cb)
 	}
 	if (!strcmp(var, "format.coverfromdescription")) {
 		cover_from_description_mode = parse_cover_from_description(value);
+		return 0;
+	}
+	if (!strcmp(var, "format.mboxrd")) {
+		stdout_mboxrd = git_config_bool(var, value);
 		return 0;
 	}
 
@@ -1870,6 +1877,7 @@ int cmd_format_patch(int argc, const char **argv, const char *prefix)
 	struct strbuf rdiff1 = STRBUF_INIT;
 	struct strbuf rdiff2 = STRBUF_INIT;
 	struct strbuf rdiff_title = STRBUF_INIT;
+	struct strbuf sprefix = STRBUF_INIT;
 	int creation_factor = -1;
 
 	const struct option builtin_format_patch_options[] = {
@@ -2010,12 +2018,10 @@ int cmd_format_patch(int argc, const char **argv, const char *prefix)
 		cover_from_description_mode = parse_cover_from_description(cover_from_description_arg);
 
 	if (reroll_count) {
-		struct strbuf sprefix = STRBUF_INIT;
-
 		strbuf_addf(&sprefix, "%s v%s",
 			    rev.subject_prefix, reroll_count);
 		rev.reroll_count = reroll_count;
-		rev.subject_prefix = strbuf_detach(&sprefix, NULL);
+		rev.subject_prefix = sprefix.buf;
 	}
 
 	for (i = 0; i < extra_hdr.nr; i++) {
@@ -2104,6 +2110,9 @@ int cmd_format_patch(int argc, const char **argv, const char *prefix)
 	die_for_incompatible_opt3(use_stdout, "--stdout",
 				  rev.diffopt.close_file, "--output",
 				  !!output_directory, "--output-directory");
+
+	if (use_stdout && stdout_mboxrd)
+		rev.commit_format = CMIT_FMT_MBOXRD;
 
 	if (use_stdout) {
 		setup_pager();
@@ -2376,6 +2385,7 @@ done:
 	strbuf_release(&rdiff1);
 	strbuf_release(&rdiff2);
 	strbuf_release(&rdiff_title);
+	strbuf_release(&sprefix);
 	free(to_free);
 	if (rev.ref_message_ids)
 		string_list_clear(rev.ref_message_ids, 0);

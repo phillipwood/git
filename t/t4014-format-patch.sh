@@ -2281,7 +2281,25 @@ test_expect_success 'format-patch --attach cover-letter only is non-multipart' '
 	test_line_count = 1 output
 '
 
-test_expect_success 'format-patch --pretty=mboxrd' '
+test_expect_success 'format-patch with format.attach' '
+	test_when_finished "rm -fr patches" &&
+	separator=attachment-separator &&
+	test_config format.attach "$separator" &&
+	filename=$(git format-patch -o patches -1) &&
+	grep "^Content-Type: multipart/.*$separator" "$filename"
+'
+
+test_expect_success 'format-patch with format.attach=disabled' '
+	test_when_finished "rm -fr patches" &&
+	separator=attachment-separator &&
+	test_config_global format.attach "$separator" &&
+	test_config format.attach "" &&
+	filename=$(git format-patch -o patches -1) &&
+	# The output should not even declare content type for text/plain.
+	! grep "^Content-Type: multipart/" "$filename"
+'
+
+test_expect_success '-c format.mboxrd format-patch' '
 	sp=" " &&
 	cat >msg <<-INPUT_END &&
 	mboxrd should escape the body
@@ -2316,7 +2334,9 @@ test_expect_success 'format-patch --pretty=mboxrd' '
 	INPUT_END
 
 	C=$(git commit-tree HEAD^^{tree} -p HEAD <msg) &&
-	git format-patch --pretty=mboxrd --stdout -1 $C~1..$C >patch &&
+	git -c format.mboxrd format-patch --stdout -1 $C~1..$C >patch &&
+	git format-patch --pretty=mboxrd --stdout -1 $C~1..$C >compat &&
+	test_cmp patch compat &&
 	git grep -h --no-index -A11 \
 		"^>From could trip up a loose mbox parser" patch >actual &&
 	test_cmp expect actual

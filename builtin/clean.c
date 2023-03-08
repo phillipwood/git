@@ -560,7 +560,7 @@ static int parse_choice(struct menu_stuff *menu_stuff,
 
 /*
  * Implement a git-add-interactive compatible UI, which is borrowed
- * from git-add--interactive.perl.
+ * from add-interactive.c.
  *
  * Return value:
  *
@@ -1092,5 +1092,6 @@ int cmd_clean(int argc, const char **argv, const char *prefix)
 	strbuf_release(&buf);
 	string_list_clear(&del_list, 0);
 	string_list_clear(&exclude_list, 0);
+	clear_pathspec(&pathspec);
 	return (errors != 0);
 }

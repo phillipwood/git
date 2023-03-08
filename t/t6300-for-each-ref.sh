@@ -606,7 +606,7 @@ test_expect_success 'create tag without tagger' '
 	git tag -a -m "Broken tag" taggerless &&
 	git tag -f taggerless $(git cat-file tag taggerless |
 		sed -e "/^tagger /d" |
-		git hash-object --stdin -w -t tag)
+		git hash-object --literally --stdin -w -t tag)
 '
 
 test_atom refs/tags/taggerless type 'commit'
@@ -1240,6 +1240,24 @@ test_expect_success 'basic atom: head contents:trailers' '
 
 test_expect_success 'basic atom: rest must fail' '
 	test_must_fail git for-each-ref --format="%(rest)" refs/heads/main
+'
+
+test_expect_success 'HEAD atom does not take arguments' '
+	test_must_fail git for-each-ref --format="%(HEAD:foo)" 2>err &&
+	echo "fatal: %(HEAD) does not take arguments" >expect &&
+	test_cmp expect err
+'
+
+test_expect_success 'subject atom rejects unknown arguments' '
+	test_must_fail git for-each-ref --format="%(subject:foo)" 2>err &&
+	echo "fatal: unrecognized %(subject) argument: foo" >expect &&
+	test_cmp expect err
+'
+
+test_expect_success 'refname atom rejects unknown arguments' '
+	test_must_fail git for-each-ref --format="%(refname:foo)" 2>err &&
+	echo "fatal: unrecognized %(refname) argument: foo" >expect &&
+	test_cmp expect err
 '
 
 test_expect_success 'trailer parsing not fooled by --- line' '

@@ -351,10 +351,25 @@ static const char *gpg_sign_opt_quoted(struct replay_opts *opts)
 	return buf.buf;
 }
 
+void replay_opts_release(struct replay_opts *opts)
+{
+	free(opts->gpg_sign);
+	free(opts->reflog_action);
+	free(opts->default_strategy);
+	free(opts->strategy);
+	for (size_t i = 0; i < opts->xopts_nr; i++)
+		free(opts->xopts[i]);
+	free(opts->xopts);
+	strbuf_release(&opts->current_fixups);
+	if (opts->revs)
+		release_revisions(opts->revs);
+	free(opts->revs);
+}
+
 int sequencer_remove_state(struct replay_opts *opts)
 {
 	struct strbuf buf = STRBUF_INIT;
-	int i, ret = 0;
+	int ret = 0;
 
 	if (is_rebase_i(opts) &&
 	    strbuf_read_file(&buf, rebase_path_refs_to_delete(), 0) > 0) {
@@ -372,15 +387,6 @@ int sequencer_remove_state(struct replay_opts *opts)
 			p = eol + 1;
 		}
 	}
-
-	free(opts->gpg_sign);
-	free(opts->reflog_action);
-	free(opts->default_strategy);
-	free(opts->strategy);
-	for (i = 0; i < opts->xopts_nr; i++)
-		free(opts->xopts[i]);
-	free(opts->xopts);
-	strbuf_release(&opts->current_fixups);
 
 	strbuf_reset(&buf);
 	strbuf_addstr(&buf, get_dir(opts));
@@ -2271,8 +2277,10 @@ static int do_pick_commit(struct repository *r,
 		reword = 1;
 	else if (is_fixup(command)) {
 		if (update_squash_messages(r, command, commit,
-					   opts, item->flags))
-			return -1;
+					   opts, item->flags)) {
+			res = -1;
+			goto leave;
+		}
 		flags |= AMEND_MSG;
 		if (!final_fixup)
 			msg_file = rebase_path_squash_msg();
@@ -2282,9 +2290,11 @@ static int do_pick_commit(struct repository *r,
 		} else {
 			const char *dest = git_path_squash_msg(r);
 			unlink(dest);
-			if (copy_file(dest, rebase_path_squash_msg(), 0666))
-				return error(_("could not rename '%s' to '%s'"),
-					     rebase_path_squash_msg(), dest);
+			if (copy_file(dest, rebase_path_squash_msg(), 0666)) {
+				res = error(_("could not rename '%s' to '%s'"),
+					    rebase_path_squash_msg(), dest);
+				goto leave;
+			}
 			unlink(git_path_merge_msg(r));
 			msg_file = dest;
 			flags |= EDIT_MSG;
@@ -2322,7 +2332,6 @@ static int do_pick_commit(struct repository *r,
 		free_commit_list(common);
 		free_commit_list(remotes);
 	}
-	strbuf_release(&msgbuf);
 
 	/*
 	 * If the merge was clean or if it failed due to conflict, we write
@@ -2396,6 +2405,7 @@ fast_forward_edit:
 leave:
 	free_message(commit, &msg);
 	free(author);
+	strbuf_release(&msgbuf);
 	update_abort_safety_file();
 
 	return res;
@@ -2469,12 +2479,39 @@ static int is_command(enum todo_command command, const char **bol)
 {
 	const char *str = todo_command_info[command].str;
 	const char nick = todo_command_info[command].c;
-	const char *p = *bol + 1;
+	const char *p = *bol;
 
-	return skip_prefix(*bol, str, bol) ||
-		((nick && **bol == nick) &&
-		 (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || !*p) &&
-		 (*bol = p));
+	return (skip_prefix(p, str, &p) || (nick && *p++ == nick)) &&
+		(*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || !*p) &&
+		(*bol = p);
+}
+
+static int check_label_or_ref_arg(enum todo_command command, const char *arg)
+{
+	switch (command) {
+	case TODO_LABEL:
+		/*
+		 * '#' is not a valid label as the merge command uses it to
+		 * separate merge parents from the commit subject.
+		 */
+		if (!strcmp(arg, "#") ||
+		    check_refname_format(arg, REFNAME_ALLOW_ONELEVEL))
+			return error(_("'%s' is not a valid label"), arg);
+		break;
+
+	case TODO_UPDATE_REF:
+		if (check_refname_format(arg, REFNAME_ALLOW_ONELEVEL))
+			return error(_("'%s' is not a valid refname"), arg);
+		if (check_refname_format(arg, 0))
+			return error(_("update-ref requires a fully qualified "
+				       "refname e.g. refs/heads/%s"), arg);
+		break;
+
+	default:
+		BUG("unexpected todo_command");
+	}
+
+	return 0;
 }
 
 static int parse_insn_line(struct repository *r, struct todo_item *item,
@@ -2503,7 +2540,8 @@ static int parse_insn_line(struct repository *r, struct todo_item *item,
 			break;
 		}
 	if (i >= TODO_COMMENT)
-		return -1;
+		return error(_("invalid command '%.*s'"),
+			     (int)strcspn(bol, " \t\r\n"), bol);
 
 	/* Eat up extra spaces/ tabs before object name */
 	padding = strspn(bol, " \t");
@@ -2525,19 +2563,26 @@ static int parse_insn_line(struct repository *r, struct todo_item *item,
 
 	if (item->command == TODO_EXEC || item->command == TODO_LABEL ||
 	    item->command == TODO_RESET || item->command == TODO_UPDATE_REF) {
+		int ret = 0;
+
 		item->commit = NULL;
 		item->arg_offset = bol - buf;
 		item->arg_len = (int)(eol - bol);
-		return 0;
+		if (item->command == TODO_LABEL ||
+		    item->command == TODO_UPDATE_REF) {
+			saved = *eol;
+			*eol = '\0';
+			ret = check_label_or_ref_arg(item->command, bol);
+			*eol = saved;
+		}
+		return ret;
 	}
 
 	if (item->command == TODO_FIXUP) {
-		if (skip_prefix(bol, "-C", &bol) &&
-		   (*bol == ' ' || *bol == '\t')) {
+		if (skip_prefix(bol, "-C", &bol)) {
 			bol += strspn(bol, " \t");
 			item->flags |= TODO_REPLACE_FIXUP_MSG;
-		} else if (skip_prefix(bol, "-c", &bol) &&
-				  (*bol == ' ' || *bol == '\t')) {
+		} else if (skip_prefix(bol, "-c", &bol)) {
 			bol += strspn(bol, " \t");
 			item->flags |= TODO_EDIT_FIXUP_MSG;
 		}
@@ -2901,6 +2946,7 @@ static void read_strategy_opts(struct replay_opts *opts, struct strbuf *buf)
 	strbuf_reset(buf);
 	if (!read_oneliner(buf, rebase_path_strategy(), 0))
 		return;
+	free(opts->strategy);
 	opts->strategy = strbuf_detach(buf, NULL);
 	if (!read_oneliner(buf, rebase_path_strategy_opts(), 0))
 		return;
@@ -4838,8 +4884,7 @@ cleanup_head_ref:
 		if (!stat(rebase_path_rewritten_list(), &st) &&
 				st.st_size > 0) {
 			struct child_process child = CHILD_PROCESS_INIT;
-			const char *post_rewrite_hook =
-				find_hook("post-rewrite");
+			struct run_hooks_opt hook_opt = RUN_HOOKS_OPT_INIT;
 
 			child.in = open(rebase_path_rewritten_list(), O_RDONLY);
 			child.git_cmd = 1;
@@ -4849,18 +4894,9 @@ cleanup_head_ref:
 			/* we don't care if this copying failed */
 			run_command(&child);
 
-			if (post_rewrite_hook) {
-				struct child_process hook = CHILD_PROCESS_INIT;
-
-				hook.in = open(rebase_path_rewritten_list(),
-					O_RDONLY);
-				hook.stdout_to_stderr = 1;
-				hook.trace2_hook_name = "post-rewrite";
-				strvec_push(&hook.args, post_rewrite_hook);
-				strvec_push(&hook.args, "rebase");
-				/* we don't care if this hook failed */
-				run_command(&hook);
-			}
+			hook_opt.path_to_stdin = rebase_path_rewritten_list();
+			strvec_push(&hook_opt.args, "rebase");
+			run_hooks_opt("post-rewrite", &hook_opt);
 		}
 		apply_autostash(rebase_path_autostash());
 
@@ -5749,8 +5785,8 @@ static void todo_list_add_exec_commands(struct todo_list *todo_list,
 
 		base_items[i].command = TODO_EXEC;
 		base_items[i].offset_in_buf = base_offset;
-		base_items[i].arg_offset = base_offset + strlen("exec ");
-		base_items[i].arg_len = command_len - strlen("exec ");
+		base_items[i].arg_offset = base_offset;
+		base_items[i].arg_len = command_len;
 
 		base_offset += command_len + 1;
 	}

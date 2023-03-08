@@ -2800,7 +2800,7 @@ static void show_stats(struct diffstat_t *data, struct diff_options *options)
 		else if (file->is_unmerged) {
 			strbuf_addf(&out, " %s%s%*s | %*s",
 				    prefix, name, padding, "",
-				    number_width, "Unmerged");
+				    number_width, "Unmerged\n");
 			emit_diff_symbol(options, DIFF_SYMBOL_STATS_LINE,
 					 out.buf, out.len, 0);
 			strbuf_reset(&out);
@@ -3435,6 +3435,22 @@ static int diff_filepair_is_phoney(struct diff_filespec *one,
 	 * "remerge CONFLICT" header associated with the path.
 	 */
 	return !DIFF_FILE_VALID(one) && !DIFF_FILE_VALID(two);
+}
+
+static int set_diff_algorithm(struct diff_options *opts,
+			      const char *alg)
+{
+	long value = parse_algorithm_value(alg);
+
+	if (value < 0)
+		return -1;
+
+	/* clear out previous settings */
+	DIFF_XDL_CLR(opts, NEED_MINIMAL);
+	opts->xdl_opts &= ~XDF_DIFF_ALGORITHM_MASK;
+	opts->xdl_opts |= value;
+
+	return 0;
 }
 
 static void builtin_diff(const char *name_a,
@@ -4440,15 +4456,13 @@ static void run_diff_cmd(const char *pgm,
 	const char *xfrm_msg = NULL;
 	int complete_rewrite = (p->status == DIFF_STATUS_MODIFIED) && p->score;
 	int must_show_header = 0;
+	struct userdiff_driver *drv = NULL;
 
-
-	if (o->flags.allow_external) {
-		struct userdiff_driver *drv;
-
+	if (o->flags.allow_external || !o->ignore_driver_algorithm)
 		drv = userdiff_find_by_path(o->repo->index, attr_path);
-		if (drv && drv->external)
-			pgm = drv->external;
-	}
+
+	if (o->flags.allow_external && drv && drv->external)
+		pgm = drv->external;
 
 	if (msg) {
 		/*
@@ -4465,12 +4479,16 @@ static void run_diff_cmd(const char *pgm,
 		run_external_diff(pgm, name, other, one, two, xfrm_msg, o);
 		return;
 	}
-	if (one && two)
+	if (one && two) {
+		if (!o->ignore_driver_algorithm && drv && drv->algorithm)
+			set_diff_algorithm(o, drv->algorithm);
+
 		builtin_diff(name, other ? other : name,
 			     one, two, xfrm_msg, must_show_header,
 			     o, complete_rewrite);
-	else
+	} else {
 		fprintf(o->file, "* Unmerged path %s\n", name);
+	}
 }
 
 static void diff_fill_oid_info(struct diff_filespec *one, struct index_state *istate)
@@ -4567,6 +4585,14 @@ static void run_diffstat(struct diff_filepair *p, struct diff_options *o,
 	const char *name;
 	const char *other;
 
+	if (!o->ignore_driver_algorithm) {
+		struct userdiff_driver *drv = userdiff_find_by_path(o->repo->index,
+								    p->one->path);
+
+		if (drv && drv->algorithm)
+			set_diff_algorithm(o, drv->algorithm);
+	}
+
 	if (DIFF_PAIR_UNMERGED(p)) {
 		/* unmerged */
 		builtin_diffstat(p->one->path, NULL, NULL, NULL,
@@ -4610,8 +4636,6 @@ static void run_checkdiff(struct diff_filepair *p, struct diff_options *o)
 
 	builtin_checkdiff(name, other, attr_path, p->one, p->two, o);
 }
-
-static void prep_parse_options(struct diff_options *options);
 
 void repo_diff_setup(struct repository *r, struct diff_options *options)
 {
@@ -4658,8 +4682,6 @@ void repo_diff_setup(struct repository *r, struct diff_options *options)
 
 	options->color_moved = diff_color_moved_default;
 	options->color_moved_ws_handling = diff_color_moved_ws_default;
-
-	prep_parse_options(options);
 }
 
 static const char diff_status_letters[] = {
@@ -4817,8 +4839,6 @@ void diff_setup_done(struct diff_options *options)
 			options->filter = ~filter_bit[DIFF_STATUS_FILTER_AON];
 		options->filter &= ~options->filter_not;
 	}
-
-	FREE_AND_NULL(options->parseopts);
 }
 
 int parse_long_opt(const char *opt, const char **argv,
@@ -5113,17 +5133,32 @@ static int diff_opt_diff_algorithm(const struct option *opt,
 				   const char *arg, int unset)
 {
 	struct diff_options *options = opt->value;
-	long value = parse_algorithm_value(arg);
 
 	BUG_ON_OPT_NEG(unset);
-	if (value < 0)
+
+	if (set_diff_algorithm(options, arg))
 		return error(_("option diff-algorithm accepts \"myers\", "
 			       "\"minimal\", \"patience\" and \"histogram\""));
 
-	/* clear out previous settings */
-	DIFF_XDL_CLR(options, NEED_MINIMAL);
-	options->xdl_opts &= ~XDF_DIFF_ALGORITHM_MASK;
-	options->xdl_opts |= value;
+	options->ignore_driver_algorithm = 1;
+
+	return 0;
+}
+
+static int diff_opt_diff_algorithm_no_arg(const struct option *opt,
+				   const char *arg, int unset)
+{
+	struct diff_options *options = opt->value;
+
+	BUG_ON_OPT_NEG(unset);
+	BUG_ON_OPT_ARG(arg);
+
+	if (set_diff_algorithm(options, opt->long_name))
+		BUG("available diff algorithms include \"myers\", "
+			       "\"minimal\", \"patience\" and \"histogram\"");
+
+	options->ignore_driver_algorithm = 1;
+
 	return 0;
 }
 
@@ -5256,7 +5291,6 @@ static int diff_opt_patience(const struct option *opt,
 
 	BUG_ON_OPT_NEG(unset);
 	BUG_ON_OPT_ARG(arg);
-	options->xdl_opts = DIFF_WITH_ALG(options, PATIENCE_DIFF);
 	/*
 	 * Both --patience and --anchored use PATIENCE_DIFF
 	 * internally, so remove any anchors previously
@@ -5265,7 +5299,9 @@ static int diff_opt_patience(const struct option *opt,
 	for (i = 0; i < options->anchors_nr; i++)
 		free(options->anchors[i]);
 	options->anchors_nr = 0;
-	return 0;
+	options->ignore_driver_algorithm = 1;
+
+	return set_diff_algorithm(options, "patience");
 }
 
 static int diff_opt_ignore_regex(const struct option *opt,
@@ -5415,7 +5451,8 @@ static int diff_opt_rotate_to(const struct option *opt, const char *arg, int uns
 	return 0;
 }
 
-static void prep_parse_options(struct diff_options *options)
+struct option *add_diff_options(const struct option *opts,
+				struct diff_options *options)
 {
 	struct option parseopts[] = {
 		OPT_GROUP(N_("Diff output format options")),
@@ -5567,9 +5604,10 @@ static void prep_parse_options(struct diff_options *options)
 			    N_("prevent rename/copy detection if the number of rename/copy targets exceeds given limit")),
 
 		OPT_GROUP(N_("Diff algorithm options")),
-		OPT_BIT(0, "minimal", &options->xdl_opts,
-			N_("produce the smallest possible diff"),
-			XDF_NEED_MINIMAL),
+		OPT_CALLBACK_F(0, "minimal", options, NULL,
+			       N_("produce the smallest possible diff"),
+			       PARSE_OPT_NONEG | PARSE_OPT_NOARG,
+			       diff_opt_diff_algorithm_no_arg),
 		OPT_BIT_F('w', "ignore-all-space", &options->xdl_opts,
 			  N_("ignore whitespace when comparing lines"),
 			  XDF_IGNORE_WHITESPACE, PARSE_OPT_NONEG),
@@ -5595,9 +5633,10 @@ static void prep_parse_options(struct diff_options *options)
 			       N_("generate diff using the \"patience diff\" algorithm"),
 			       PARSE_OPT_NONEG | PARSE_OPT_NOARG,
 			       diff_opt_patience),
-		OPT_BITOP(0, "histogram", &options->xdl_opts,
-			  N_("generate diff using the \"histogram diff\" algorithm"),
-			  XDF_HISTOGRAM_DIFF, XDF_DIFF_ALGORITHM_MASK),
+		OPT_CALLBACK_F(0, "histogram", options, NULL,
+			       N_("generate diff using the \"histogram diff\" algorithm"),
+			       PARSE_OPT_NONEG | PARSE_OPT_NOARG,
+			       diff_opt_diff_algorithm_no_arg),
 		OPT_CALLBACK_F(0, "diff-algorithm", options, N_("<algorithm>"),
 			       N_("choose a diff algorithm"),
 			       PARSE_OPT_NONEG, diff_opt_diff_algorithm),
@@ -5685,22 +5724,25 @@ static void prep_parse_options(struct diff_options *options)
 		OPT_END()
 	};
 
-	ALLOC_ARRAY(options->parseopts, ARRAY_SIZE(parseopts));
-	memcpy(options->parseopts, parseopts, sizeof(parseopts));
+	return parse_options_concat(opts, parseopts);
 }
 
 int diff_opt_parse(struct diff_options *options,
 		   const char **av, int ac, const char *prefix)
 {
+	struct option no_options[] = { OPT_END() };
+	struct option *parseopts = add_diff_options(no_options, options);
+
 	if (!prefix)
 		prefix = "";
 
-	ac = parse_options(ac, av, prefix, options->parseopts, NULL,
+	ac = parse_options(ac, av, prefix, parseopts, NULL,
 			   PARSE_OPT_KEEP_DASHDASH |
 			   PARSE_OPT_KEEP_UNKNOWN_OPT |
 			   PARSE_OPT_NO_INTERNAL_HELP |
 			   PARSE_OPT_ONE_SHOT |
 			   PARSE_OPT_STOP_AT_NON_OPTION);
+	free(parseopts);
 
 	return ac;
 }
@@ -6509,7 +6551,6 @@ void diff_free(struct diff_options *options)
 	diff_free_file(options);
 	diff_free_ignore_regex(options);
 	clear_pathspec(&options->pathspec);
-	FREE_AND_NULL(options->parseopts);
 }
 
 void diff_flush(struct diff_options *options)

@@ -29,6 +29,7 @@
 #include "xdiff-interface.h"
 #include "entry.h"
 #include "parallel-checkout.h"
+#include "add-interactive.h"
 
 static const char * const checkout_usage[] = {
 	N_("git checkout [<options>] <branch>"),
@@ -232,7 +233,7 @@ static int checkout_stage(int stage, const struct cache_entry *ce, int pos,
 		pos++;
 	}
 	if (!overlay_mode) {
-		unlink_entry(ce);
+		unlink_entry(ce, NULL);
 		return 0;
 	}
 	if (stage == 2)
@@ -499,7 +500,7 @@ static int checkout_paths(const struct checkout_opts *opts,
 		    "--merge", "--conflict", "--staged");
 
 	if (opts->patch_mode) {
-		const char *patch_mode;
+		enum add_p_mode patch_mode;
 		const char *rev = new_branch_info->name;
 		char rev_oid[GIT_MAX_HEXSZ + 1];
 
@@ -517,15 +518,16 @@ static int checkout_paths(const struct checkout_opts *opts,
 			rev = oid_to_hex_r(rev_oid, &new_branch_info->commit->object.oid);
 
 		if (opts->checkout_index && opts->checkout_worktree)
-			patch_mode = "--patch=checkout";
+			patch_mode = ADD_P_CHECKOUT;
 		else if (opts->checkout_index && !opts->checkout_worktree)
-			patch_mode = "--patch=reset";
+			patch_mode = ADD_P_RESET;
 		else if (!opts->checkout_index && opts->checkout_worktree)
-			patch_mode = "--patch=worktree";
+			patch_mode = ADD_P_WORKTREE;
 		else
 			BUG("either flag must have been set, worktree=%d, index=%d",
 			    opts->checkout_worktree, opts->checkout_index);
-		return run_add_interactive(rev, patch_mode, &opts->pathspec);
+		return !!run_add_p(the_repository, patch_mode, rev,
+				   &opts->pathspec);
 	}
 
 	repo_hold_locked_index(the_repository, &lock_file, LOCK_DIE_ON_ERROR);
@@ -1270,7 +1272,7 @@ static int parse_branchname_arg(int argc, const char **argv,
 	 *       between A and B, A...B names that merge base.
 	 *
 	 *   (b) If <something> is _not_ a commit, either "--" is present
-	 *       or <something> is not a path, no -t or -b was given, and
+	 *       or <something> is not a path, no -t or -b was given,
 	 *       and there is a tracking branch whose name is <something>
 	 *       in one and only one remote (or if the branch exists on the
 	 *       remote named in checkout.defaultRemote), then this is a
@@ -1471,6 +1473,8 @@ static void die_if_some_operation_in_progress(void)
 		      "or \"git worktree add\"."));
 	if (state.bisect_in_progress)
 		warning(_("you are switching branch while bisecting"));
+
+	wt_status_state_free_buffers(&state);
 }
 
 static int checkout_branch(struct checkout_opts *opts,

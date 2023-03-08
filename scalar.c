@@ -143,6 +143,7 @@ static int set_recommended_config(int reconfigure)
 		{ "credential.validate", "false", 1 }, /* GCM4W-only */
 		{ "gc.auto", "0", 1 },
 		{ "gui.GCWarning", "false", 1 },
+		{ "index.skipHash", "false", 1 },
 		{ "index.threads", "true", 1 },
 		{ "index.version", "4", 1 },
 		{ "merge.stat", "false", 1 },
@@ -261,7 +262,7 @@ static int register_dir(void)
 		return error(_("could not set recommended config"));
 
 	if (toggle_maintenance(1))
-		return error(_("could not turn on maintenance"));
+		warning(_("could not turn on maintenance"));
 
 	if (have_fsmonitor_support() && start_fsmonitor_daemon()) {
 		return error(_("could not start the FSMonitor daemon"));
@@ -404,7 +405,7 @@ void load_builtin_commands(const char *prefix, struct cmdnames *cmds)
 static int cmd_clone(int argc, const char **argv)
 {
 	const char *branch = NULL;
-	int full_clone = 0, single_branch = 0;
+	int full_clone = 0, single_branch = 0, show_progress = isatty(2);
 	struct option clone_options[] = {
 		OPT_STRING('b', "branch", &branch, N_("<branch>"),
 			   N_("branch to checkout after clone")),
@@ -499,7 +500,9 @@ static int cmd_clone(int argc, const char **argv)
 	if (set_recommended_config(0))
 		return error(_("could not configure '%s'"), dir);
 
-	if ((res = run_git("fetch", "--quiet", "origin", NULL))) {
+	if ((res = run_git("fetch", "--quiet",
+				show_progress ? "--progress" : "--no-progress",
+				"origin", NULL))) {
 		warning(_("partial clone failed; attempting full clone"));
 
 		if (set_config("remote.origin.promisor") ||
@@ -508,7 +511,9 @@ static int cmd_clone(int argc, const char **argv)
 			goto cleanup;
 		}
 
-		if ((res = run_git("fetch", "--quiet", "origin", NULL)))
+		if ((res = run_git("fetch", "--quiet",
+					show_progress ? "--progress" : "--no-progress",
+					"origin", NULL)))
 			goto cleanup;
 	}
 
