@@ -4,16 +4,20 @@
  * Copyright (C) 2020 Phillip Wood
  */
 #include "builtin.h"
+#include "alias.h"
 #include "config.h"
 #include "parse-options.h"
+#include "tempfile.h"
 
 enum cmd {
 	CMD_GET,
 	CMD_SET,
+	CMD_EDIT,
 };
 
 static const char * const alias_usage[] = {
 	N_("git alias <name> [<command> [args ...]]"),
+	N_("git alias --edit <name>"),
 	NULL
 };
 
@@ -197,6 +201,53 @@ out:
 	return res;
 }
 
+static int edit_definition(const char* alias, const char *old_definition,
+			   char **new_definition)
+{
+	int res;
+	const char **argv = NULL;
+	struct tempfile *tmp;
+	struct strbuf buf = STRBUF_INIT;
+
+	strbuf_addf(&buf, "git-alias-%s-XXXXXXXX", alias);
+	tmp = mks_tempfile(buf.buf);
+	strbuf_reset(&buf);
+	if (!tmp) {
+		res = error_errno(_("could not create temporary file"));
+		goto out;
+	}
+	if (old_definition &&
+	    write_in_full(tmp->fd, old_definition, strlen(old_definition)) < 0) {
+		res = error_errno(_("could not write to temporary file"));
+		goto out;
+	}
+	res = launch_editor(tmp->filename.buf, &buf, NULL);
+	delete_tempfile(&tmp);
+	if (res)
+		goto out;
+
+	strbuf_stripspace(&buf, 0);
+	if (!buf.len) {
+		puts("editing cancelled by empty file");
+		res = -1;
+		goto out;
+	}
+	/* remove the newline appended by strbuf_stripspace() */
+	buf.buf[--buf.len] = '\0';
+	if (buf.buf[0] !=  '!')
+		res = split_cmdline(buf.buf, &argv);
+	if (res < 0) {
+		res = error(_("invalid alias - %s"), split_cmdline_strerror(res));
+		goto out;
+	}
+	res = 0;
+	*new_definition = strbuf_detach(&buf, 0);
+out:
+	free(argv);
+	strbuf_release(&buf);
+	return res;
+}
+
 static int update_alias(int argc, const char **argv, enum cmd cmd)
 {
 	int res;
@@ -221,6 +272,12 @@ static int update_alias(int argc, const char **argv, enum cmd cmd)
 	}
 
 	switch(cmd) {
+	case CMD_EDIT:
+		res = edit_definition(alias, old_definition, &new_definition);
+		if (res)
+			goto out;
+		break;
+
 	case CMD_SET:
 		new_definition = concatanate_argv(argc, argv);
 		if (!new_definition) {
@@ -279,12 +336,18 @@ int cmd_alias(int argc, const char **argv, const char *prefix)
 	enum cmd cmd = CMD_GET;
 
 	struct option options[] = {
+		OPT_CMDMODE('e', "edit", &cmd, _("edit alias definition"),
+			    CMD_EDIT),
 		OPT_END()
 	};
 
 	argc = parse_options(argc, argv, prefix, options, alias_usage,
 			     PARSE_OPT_STOP_AT_NON_OPTION);
-	if (argc == 1) {
+	if (cmd == CMD_EDIT) {
+		if (argc != 1)
+			usage_with_options(alias_usage, options);
+		return !!update_alias(argc, argv, cmd);
+	} else if (argc == 1) {
 		return !!get_alias(argv[0]);
 	} else if (argc > 1) {
 		cmd = CMD_SET;
