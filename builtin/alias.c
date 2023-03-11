@@ -12,12 +12,13 @@
 enum cmd {
 	CMD_GET,
 	CMD_SET,
+	CMD_DELETE,
 	CMD_EDIT,
 };
 
 static const char * const alias_usage[] = {
 	N_("git alias <name> [<command> [args ...]]"),
-	N_("git alias --edit <name>"),
+	N_("git alias ( --edit | --delete ) <name>"),
 	NULL
 };
 
@@ -248,6 +249,35 @@ out:
 	return res;
 }
 
+static int delete_alias(const char* alias)
+{
+	int res;
+	char *file;
+	const char *origin;
+	struct strbuf key = STRBUF_INIT;
+
+	res = find_alias_definition(alias, NULL, &file, &origin);
+	if (res < 0) {
+		goto out;
+	} else if (res) {
+		res = error(_("alias '%s' does not exist"), alias);
+		goto out;
+	} else if (strcmp(origin, "file")) {
+		res = error(_("cannot delete alias set in %s"), origin);
+		goto out;
+	}
+	strbuf_addf(&key, "alias.%s", alias);
+	res = git_config_set_in_file_gently(file, key.buf, NULL);
+	strbuf_release(&key);
+	if (res)
+		error(_("could not delete alias '%s'"), alias);
+	else
+		printf(_("deleted alias '%s'\n"), alias);
+ out:
+	free(file);
+	return res;
+}
+
 static int update_alias(int argc, const char **argv, enum cmd cmd)
 {
 	int res;
@@ -336,6 +366,7 @@ int cmd_alias(int argc, const char **argv, const char *prefix)
 	enum cmd cmd = CMD_GET;
 
 	struct option options[] = {
+		OPT_CMDMODE(0, "delete", &cmd, _("delete alias"), CMD_DELETE),
 		OPT_CMDMODE('e', "edit", &cmd, _("edit alias definition"),
 			    CMD_EDIT),
 		OPT_END()
@@ -343,7 +374,11 @@ int cmd_alias(int argc, const char **argv, const char *prefix)
 
 	argc = parse_options(argc, argv, prefix, options, alias_usage,
 			     PARSE_OPT_STOP_AT_NON_OPTION);
-	if (cmd == CMD_EDIT) {
+	if (cmd == CMD_DELETE) {
+		if (argc != 1)
+			usage_with_options(alias_usage, options);
+		return !!delete_alias(argv[0]);
+	} else if (cmd == CMD_EDIT) {
 		if (argc != 1)
 			usage_with_options(alias_usage, options);
 		return !!update_alias(argc, argv, cmd);
