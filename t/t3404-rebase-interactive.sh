@@ -288,13 +288,14 @@ test_expect_success 'abort' '
 '
 
 test_expect_success 'abort with error when new base cannot be checked out' '
+	test_when_finished "git rebase --abort ||:" &&
 	git rm --cached file1 &&
 	git commit -m "remove file in base" &&
 	test_must_fail git rebase -i primary > output 2>&1 &&
 	test_i18ngrep "The following untracked working tree files would be overwritten by checkout:" \
 		output &&
 	test_i18ngrep "file1" output &&
-	test_path_is_missing .git/rebase-merge &&
+	test_path_is_dir .git/rebase-merge &&
 	rm file1 &&
 	git reset --hard HEAD^
 '

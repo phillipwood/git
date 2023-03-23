@@ -4570,6 +4570,10 @@ static int checkout_onto(struct repository *r, struct replay_opts *opts,
 		.default_reflog_action = sequencer_reflog_action(opts)
 	};
 	if (reset_head(r, &ropts)) {
+		// Editing the todo may have been costly; don't just discard it.
+		if (opts->precious_todo)
+			exit(1);  // Error was already printed
+
 		apply_autostash(rebase_path_autostash());
 		sequencer_remove_state(opts);
 		return error(_("could not detach HEAD"));
