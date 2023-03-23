@@ -372,7 +372,6 @@ static int parse_opt_keep_empty(const struct option *opt, const char *arg,
 
 	imply_merge(opts, unset ? "--no-keep-empty" : "--keep-empty");
 	opts->keep_empty = !unset;
-	opts->type = REBASE_MERGE;
 	return 0;
 }
 
@@ -1494,9 +1493,6 @@ int cmd_rebase(int argc, const char **argv, const char *prefix)
 		}
 	}
 
-	if (options.type == REBASE_MERGE)
-		imply_merge(&options, "--merge");
-
 	if (options.root && !options.onto_name)
 		imply_merge(&options, "--root without --onto");
 
@@ -1534,7 +1530,7 @@ int cmd_rebase(int argc, const char **argv, const char *prefix)
 
 	if (options.type == REBASE_UNSPECIFIED) {
 		if (!strcmp(options.default_backend, "merge"))
-			imply_merge(&options, "--merge");
+			options.type = REBASE_MERGE;
 		else if (!strcmp(options.default_backend, "apply"))
 			options.type = REBASE_APPLY;
 		else
