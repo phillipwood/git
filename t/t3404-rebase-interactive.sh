@@ -1597,6 +1597,37 @@ test_expect_success 'static check of bad command' '
 	test C = $(git cat-file commit HEAD^ | sed -ne \$p)
 '
 
+
+test_expect_success 'continue after bad first command' '
+	test_when_finished "git rebase --abort ||:" &&
+	git checkout primary^0 &&
+	git reflog expire --expire=all HEAD &&
+	(
+		set_fake_editor &&
+		test_must_fail env FAKE_LINES="bad 1 pick 1 pick 2 reword 3" \
+			git rebase -i HEAD~3 &&
+		test_cmp_rev HEAD primary &&
+		FAKE_LINES="pick 2 pick 3 reword 4" git rebase --edit-todo &&
+		FAKE_COMMIT_MESSAGE="E_reworded" git rebase --continue
+	) &&
+	git reflog > reflog &&
+	test $(grep -c fast-forward reflog) = 1 &&
+	test_cmp_rev HEAD~1 primary~1 &&
+	test "$(git log -1 --format=%B)" = "E_reworded"
+'
+
+test_expect_success 'abort after bad first command' '
+	test_when_finished "git rebase --abort ||:" &&
+	git checkout primary^0 &&
+	(
+		set_fake_editor &&
+		test_must_fail env FAKE_LINES="bad 1 pick 1 pick 2 reword 3" \
+			git rebase -i HEAD~3
+	) &&
+	git rebase --abort &&
+	test_cmp_rev HEAD primary
+'
+
 test_expect_success 'tabs and spaces are accepted in the todolist' '
 	rebase_setup_and_clean indented-comment &&
 	write_script add-indent.sh <<-\EOF &&

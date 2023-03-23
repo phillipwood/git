@@ -340,7 +340,9 @@ static int run_sequencer_rebase(struct rebase_options *opts)
 	case ACTION_CONTINUE: {
 		struct replay_opts replay_opts = get_replay_opts(opts);
 
-		ret = sequencer_continue(the_repository, &replay_opts);
+		ret = sequencer_continue(the_repository, &replay_opts, flags,
+					 opts->onto_name, opts->onto,
+					 &opts->orig_head->object.oid);
 		replay_opts_release(&replay_opts);
 		break;
 	}

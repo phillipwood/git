@@ -156,7 +156,9 @@ void todo_list_filter_update_refs(struct repository *r,
 void sequencer_init_config(struct replay_opts *opts);
 int sequencer_pick_revisions(struct repository *repo,
 			     struct replay_opts *opts);
-int sequencer_continue(struct repository *repo, struct replay_opts *opts);
+int sequencer_continue(struct repository *repo, struct replay_opts *opts, unsigned flags,
+		       const char *onto_name, struct commit *onto,
+		       const struct object_id *orig_head);
 int sequencer_rollback(struct repository *repo, struct replay_opts *opts);
 int sequencer_skip(struct repository *repo, struct replay_opts *opts);
 void replay_opts_release(struct replay_opts *opts);

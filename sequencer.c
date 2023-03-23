@@ -3369,7 +3369,7 @@ int sequencer_skip(struct repository *r, struct replay_opts *opts)
 	if (!is_directory(git_path_seq_dir()))
 		return 0;
 
-	return sequencer_continue(r, opts);
+	return sequencer_continue(r, opts, 0, NULL, NULL, NULL);
 
 give_advice:
 	error(_("there is nothing to skip"));
@@ -5096,7 +5096,13 @@ static int commit_staged_changes(struct repository *r,
 	return 0;
 }
 
-int sequencer_continue(struct repository *r, struct replay_opts *opts)
+static int start_rebase(struct repository *r, struct replay_opts *opts, unsigned flags,
+			const char *onto_name, struct commit *onto,
+			const struct object_id *orig_head, struct todo_list *todo_list);
+
+int sequencer_continue(struct repository *r, struct replay_opts *opts, unsigned flags,
+		       const char *onto_name, struct commit *onto,
+		       const struct object_id *orig_head)
 {
 	struct todo_list todo_list = TODO_LIST_INIT;
 	int res;
@@ -5115,6 +5121,13 @@ int sequencer_continue(struct repository *r, struct replay_opts *opts)
 				goto release_todo_list;
 
 			unlink(rebase_path_dropped());
+		}
+
+		if (!todo_list.done_nr) {
+			res = start_rebase(r, opts, flags,
+					   onto_name, onto,
+					   orig_head, &todo_list);
+			goto release_todo_list;
 		}
 
 		opts->reflog_message = reflog_message(opts, "continue", NULL);
@@ -6094,9 +6107,8 @@ int complete_action(struct repository *r, struct replay_opts *opts, unsigned fla
 		    struct todo_list *todo_list)
 {
 	char shortonto[GIT_MAX_HEXSZ + 1];
-	const char *todo_file = rebase_path_todo();
 	struct todo_list new_todo = TODO_LIST_INIT;
-	struct strbuf *buf = &todo_list->buf, buf2 = STRBUF_INIT;
+	struct strbuf *buf = &todo_list->buf;
 	struct object_id oid = onto->object.oid;
 	int res;
 
@@ -6141,47 +6153,50 @@ int complete_action(struct repository *r, struct replay_opts *opts, unsigned fla
 
 		return error(_("nothing to do"));
 	} else if (res == EDIT_TODO_INCORRECT) {
-		checkout_onto(r, opts, onto_name, &onto->object.oid, orig_head);
 		todo_list_release(&new_todo);
 
 		return -1;
 	}
 
-	/* Expand the commit IDs */
-	todo_list_to_strbuf(r, &new_todo, &buf2, -1, 0);
-	strbuf_swap(&new_todo.buf, &buf2);
-	strbuf_release(&buf2);
-	new_todo.total_nr -= new_todo.nr;
-	if (todo_list_parse_insn_buffer(r, new_todo.buf.buf, &new_todo) < 0)
-		BUG("invalid todo list after expanding IDs:\n%s",
-		    new_todo.buf.buf);
-
-	if (opts->allow_ff && skip_unnecessary_picks(r, &new_todo, &oid)) {
-		todo_list_release(&new_todo);
-		return error(_("could not skip unnecessary pick commands"));
-	}
-
-	if (todo_list_write_to_file(r, &new_todo, todo_file, NULL, NULL, -1,
-				    flags & ~(TODO_LIST_SHORTEN_IDS))) {
-		todo_list_release(&new_todo);
-		return error_errno(_("could not write '%s'"), todo_file);
-	}
-
-	res = -1;
-
-	if (checkout_onto(r, opts, onto_name, &oid, orig_head))
-		goto cleanup;
-
-	if (require_clean_work_tree(r, "rebase", "", 1, 1))
-		goto cleanup;
-
-	todo_list_write_total_nr(&new_todo);
-	res = pick_commits(r, &new_todo, opts);
-
-cleanup:
+	res = start_rebase(r, opts, flags, onto_name, onto, orig_head, &new_todo);
 	todo_list_release(&new_todo);
 
 	return res;
+}
+
+static int start_rebase(struct repository *r, struct replay_opts *opts, unsigned flags,
+			const char *onto_name, struct commit *onto,
+			const struct object_id *orig_head, struct todo_list *todo_list)
+{
+	const char *todo_file = rebase_path_todo();
+	struct object_id oid = onto->object.oid;
+	struct strbuf buf2 = STRBUF_INIT;
+
+	/* Expand the commit IDs */
+	todo_list_to_strbuf(r, todo_list, &buf2, -1, 0);
+	strbuf_swap(&todo_list->buf, &buf2);
+	strbuf_release(&buf2);
+	todo_list->total_nr -= todo_list->nr;
+	if (todo_list_parse_insn_buffer(r, todo_list->buf.buf, todo_list) < 0)
+		BUG("invalid todo list after expanding IDs:\n%s",
+		    todo_list->buf.buf);
+
+	if (opts->allow_ff && skip_unnecessary_picks(r, todo_list, &oid))
+		return error(_("could not skip unnecessary pick commands"));
+
+	if (todo_list_write_to_file(r, todo_list, todo_file, NULL, NULL, -1,
+				    flags & ~(TODO_LIST_SHORTEN_IDS |
+					      TODO_LIST_APPEND_TODO_HELP)))
+		return error_errno(_("could not write '%s'"), todo_file);
+
+	if (checkout_onto(r, opts, onto_name, &oid, orig_head))
+		return -1;
+
+	if (require_clean_work_tree(r, "rebase", "", 1, 1))
+		return -1;
+
+	todo_list_write_total_nr(todo_list);
+	return pick_commits(r, todo_list, opts);
 }
 
 struct subject2item_entry {
