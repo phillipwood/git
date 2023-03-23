@@ -6123,20 +6123,20 @@ int complete_action(struct repository *r, struct replay_opts *opts, unsigned fla
 
 	res = edit_todo_list(r, todo_list, &new_todo, shortrevisions,
 			     shortonto, flags);
-	if (res == -1)
+	if (res == EDIT_TODO_IOERROR)
 		return -1;
-	else if (res == -2) {
+	else if (res == EDIT_TODO_FAILED) {
 		apply_autostash(rebase_path_autostash());
 		sequencer_remove_state(opts);
 
 		return -1;
-	} else if (res == -3) {
+	} else if (res == EDIT_TODO_ABORT) {
 		apply_autostash(rebase_path_autostash());
 		sequencer_remove_state(opts);
 		todo_list_release(&new_todo);
 
 		return error(_("nothing to do"));
-	} else if (res == -4) {
+	} else if (res == EDIT_TODO_INCORRECT) {
 		checkout_onto(r, opts, onto_name, &onto->object.oid, orig_head);
 		todo_list_release(&new_todo);
 

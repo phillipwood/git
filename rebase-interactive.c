@@ -95,7 +95,8 @@ void append_todo_help(int command_count,
 	strbuf_add_commented_lines(buf, msg, strlen(msg));
 }
 
-int edit_todo_list(struct repository *r, struct todo_list *todo_list,
+enum edit_todo_result edit_todo_list(
+		   struct repository *r, struct todo_list *todo_list,
 		   struct todo_list *new_todo, const char *shortrevisions,
 		   const char *shortonto, unsigned flags)
 {
@@ -122,28 +123,28 @@ int edit_todo_list(struct repository *r, struct todo_list *todo_list,
 		return error(_("could not write '%s'."), rebase_path_todo_backup());
 
 	if (launch_sequence_editor(todo_file, &new_todo->buf, NULL))
-		return -2;
+		return EDIT_TODO_FAILED;
 
 	strbuf_stripspace(&new_todo->buf, 1);
 	if (initial && new_todo->buf.len == 0)
-		return -3;
+		return EDIT_TODO_ABORT;
 
 	if (todo_list_parse_insn_buffer(r, new_todo->buf.buf, new_todo)) {
 		fprintf(stderr, _(edit_todo_list_advice));
-		return -4;
+		return EDIT_TODO_INCORRECT;
 	}
 
 	if (incorrect) {
 		if (todo_list_check_against_backup(r, new_todo)) {
 			write_file(rebase_path_dropped(), "%s", "");
-			return -4;
+			return EDIT_TODO_INCORRECT;
 		}
 
 		if (incorrect > 0)
 			unlink(rebase_path_dropped());
 	} else if (todo_list_check(todo_list, new_todo)) {
 		write_file(rebase_path_dropped(), "%s", "");
-		return -4;
+		return EDIT_TODO_INCORRECT;
 	}
 
 	/*
@@ -152,7 +153,7 @@ int edit_todo_list(struct repository *r, struct todo_list *todo_list,
 	 */
 	todo_list_filter_update_refs(r, new_todo);
 
-	return 0;
+	return EDIT_TODO_OK;
 }
 
 define_commit_slab(commit_seen, unsigned char);
