@@ -3579,13 +3579,18 @@ static int error_with_patch(struct repository *r,
 			    struct replay_opts *opts,
 			    int exit_code, int to_amend)
 {
-	if (commit) {
-		if (make_patch(r, commit, opts))
-			return -1;
-	} else if (copy_file(rebase_path_message(),
-			     git_path_merge_msg(r), 0666))
+	/*
+	 * Copy git_path_merge_msg() to rebase_path_message() if the
+	 * former exists and the latter does not.
+	 */
+	int res = copy_file(rebase_path_message(), git_path_merge_msg(r), 0666);
+	if (res &&
+	    !(res == COPY_OPEN_SRC_ERROR && errno == ENOENT) &&
+	    !(res == COPY_OPEN_DST_ERROR && errno == EEXIST))
 		return error(_("unable to copy '%s' to '%s'"),
 			     git_path_merge_msg(r), rebase_path_message());
+	if (commit && make_patch(r, commit, opts))
+			return -1;
 
 	if (to_amend) {
 		if (intend_to_amend())

@@ -11,6 +11,11 @@ TEST_PASSES_SANITIZE_LEAK=true
 test_expect_success 'setup' '
 	git commit --allow-empty -m "Initial empty commit" &&
 	test_commit first file a &&
+	test_commit second file &&
+	git checkout -b conflict-branch first &&
+	test_commit file-2 file-2 &&
+	test_commit conflict file &&
+	test_commit third file &&
 
 	ident="$GIT_COMMITTER_NAME <$GIT_COMMITTER_EMAIL>" &&
 
@@ -28,6 +33,22 @@ test_expect_success 'setup' '
 	Signed-off-by: $ident
 	EOF
 
+	# Expected commit message after conflict resolution for rebase --signoff
+	cat >expected-signed-conflict <<-EOF &&
+	third
+
+	Signed-off-by: $ident
+
+	conflict
+
+	Signed-off-by: $ident
+
+	file-2
+
+	Signed-off-by: $ident
+
+	EOF
+
 	# Expected commit message after rebase without --signoff (or with --no-signoff)
 	cat >expected-unsigned <<-EOF &&
 	first
@@ -38,9 +59,13 @@ test_expect_success 'setup' '
 
 # We configure an alias to do the rebase --signoff so that
 # on the next subtest we can show that --no-signoff overrides the alias
-test_expect_success 'rebase --signoff adds a sign-off line' '
-	git rbs --apply HEAD^ &&
-	test_commit_message HEAD expected-signed
+test_expect_success 'rebase --apply --signoff adds a sign-off line' '
+	test_must_fail git rbs --apply second third &&
+	git checkout --theirs file &&
+	git add file &&
+	git rebase --continue &&
+	git log --format=%B -n3 >actual &&
+	test_cmp expected-signed-conflict actual
 '
 
 test_expect_success 'rebase --no-signoff does not add a sign-off line' '
@@ -51,28 +76,32 @@ test_expect_success 'rebase --no-signoff does not add a sign-off line' '
 
 test_expect_success 'rebase --exec --signoff adds a sign-off line' '
 	test_when_finished "rm exec" &&
-	git commit --amend -m "first" &&
-	git rebase --exec "touch exec" --signoff HEAD^ &&
+	git rebase --exec "touch exec" --signoff first^ first &&
 	test_path_is_file exec &&
 	test_commit_message HEAD expected-signed
 '
 
 test_expect_success 'rebase --root --signoff adds a sign-off line' '
-	git commit --amend -m "first" &&
+	git checkout first &&
 	git rebase --root --keep-empty --signoff &&
 	test_commit_message HEAD^ expected-initial-signed &&
 	test_commit_message HEAD expected-signed
 '
 
-test_expect_success 'rebase -i --signoff fails' '
-	git commit --amend -m "first" &&
-	git rebase -i --signoff HEAD^ &&
-	test_commit_message HEAD expected-signed
+test_expect_success 'rebase -m --signoff adds a sign-off line' '
+	test_must_fail git rebase -m --signoff second third &&
+	git checkout --theirs file &&
+	git add file &&
+	GIT_EDITOR="sed -n /Conflicts:/,/^\\\$/p >actual" \
+		git rebase --continue &&
+	cat >expect <<-\EOF &&
+	# Conflicts:
+	#	file
+
+	EOF
+	test_cmp expect actual &&
+	git log --format=%B -n3 >actual &&
+	test_cmp expected-signed-conflict actual
 '
 
-test_expect_success 'rebase -m --signoff fails' '
-	git commit --amend -m "first" &&
-	git rebase -m --signoff HEAD^ &&
-	test_commit_message HEAD expected-signed
-'
 test_done
