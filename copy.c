@@ -36,10 +36,12 @@ int copy_file(const char *dst, const char *src, int mode)
 
 	mode = (mode & 0111) ? 0777 : 0666;
 	if ((fdi = open(src, O_RDONLY)) < 0)
-		return fdi;
+		return COPY_OPEN_SRC_ERROR;
 	if ((fdo = open(dst, O_WRONLY | O_CREAT | O_EXCL, mode)) < 0) {
+		int saved_errno = errno;
 		close(fdi);
-		return fdo;
+		errno = saved_errno;
+		return COPY_OPEN_DST_ERROR;
 	}
 	status = copy_fd(fdi, fdo);
 	switch (status) {
