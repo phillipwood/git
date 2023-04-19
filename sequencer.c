@@ -1550,14 +1550,6 @@ static int try_to_commit(struct repository *r,
 		const char *message = repo_logmsg_reencode(r, current_head,
 							   NULL, out_enc);
 
-		if (!msg) {
-			const char *orig_message = NULL;
-
-			find_commit_subject(message, &orig_message);
-			msg = &commit_msg;
-			strbuf_addstr(msg, orig_message);
-			hook_commit = "HEAD";
-		}
 		author = amend_author = get_author(message);
 		repo_unuse_commit_buffer(r, current_head,
 					 message);
@@ -1715,7 +1707,7 @@ static int write_rebase_head(struct object_id *oid)
 	return 0;
 }
 
-static int do_commit(struct repository *r,
+static int do_commit(struct repository *r, struct strbuf *msg_buf,
 		     const char *msg_file, const char *author,
 		     struct replay_opts *opts, unsigned int flags,
 		     struct object_id *oid)
@@ -1724,16 +1716,9 @@ static int do_commit(struct repository *r,
 
 	if (!(flags & EDIT_MSG) && !(flags & VERIFY_MSG)) {
 		struct object_id oid;
-		struct strbuf sb = STRBUF_INIT;
 
-		if (msg_file && strbuf_read_file(&sb, msg_file, 2048) < 0)
-			return error_errno(_("unable to read commit message "
-					     "from '%s'"),
-					   msg_file);
-
-		res = try_to_commit(r, msg_file ? &sb : NULL,
-				    author, opts, flags, &oid);
-		strbuf_release(&sb);
+		assert(msg_file);
+		res = try_to_commit(r, msg_buf, author, opts, flags, &oid);
 		if (!res) {
 			refs_delete_ref(get_main_ref_store(r), "",
 					"CHERRY_PICK_HEAD", NULL, 0);
@@ -1745,9 +1730,23 @@ static int do_commit(struct repository *r,
 		}
 	}
 	if (res == 1) {
+		/*
+		 * cherry-pick and revert expect the commit message to
+		 * be in .git/MERGE_MSG when msg_file ==
+		 * NULL. rebase should only set msg_file == NULL
+		 * when rewording.
+		 *
+		 */
+		const char *path = msg_file;
+		if (!path && !(flags & AMEND_MSG))
+			path = git_path_merge_msg(r);
+
 		if (is_rebase_i(opts) && oid)
 			if (write_rebase_head(oid))
 			    return -1;
+		if (path &&
+		    write_message(msg_buf->buf, msg_buf->len, path, 0))
+			return -1;
 		return run_git_commit(msg_file, opts, flags);
 	}
 
@@ -2209,6 +2208,8 @@ static int do_pick_commit(struct repository *r,
 	struct replay_ctx *ctx = opts->ctx;
 	unsigned int flags = should_edit(opts) ? EDIT_MSG : 0;
 	const char *msg_file = should_edit(opts) ? NULL : git_path_merge_msg(r);
+	/* The buffer that holds the commit message. */
+	struct strbuf *msg_buf = NULL;
 	struct object_id head;
 	struct commit *base, *next, *parent;
 	const char *base_label, *next_label;
@@ -2310,6 +2311,7 @@ static int do_pick_commit(struct repository *r,
 		next = parent;
 		next_label = msg.parent_label;
 		strbuf_reset(&ctx->message);
+		msg_buf = &ctx->message;
 		if (opts->commit_use_reference) {
 			strbuf_addstr(&ctx->message,
 				      "# *** SAY WHY WE ARE REVERTING ON THE TITLE LINE ***");
@@ -2340,18 +2342,14 @@ static int do_pick_commit(struct repository *r,
 		flags |= AMEND_MSG;
 		if (!final_fixup) {
 			msg_file = rebase_path_squash_msg();
-			write_message(ctx->message.buf, ctx->message.len,
-				      msg_file, 0);
+			msg_buf = &ctx->message;
 		} else if (ctx->have_fixup_msg) {
 			flags |= VERBATIM_MSG;
 			msg_file = rebase_path_fixup_msg();
-			write_message(ctx->fixup_msg.buf, ctx->fixup_msg.len,
-				      msg_file, 0);
+			msg_buf = &ctx->fixup_msg;
 		} else {
 			msg_file = git_path_squash_msg(r);
-			write_message(ctx->message.buf, ctx->message.len,
-				      msg_file, 0);
-			unlink(git_path_merge_msg(r));
+			msg_buf = &ctx->message;
 			flags |= EDIT_MSG;
 		}
 	} else {
@@ -2361,8 +2359,8 @@ static int do_pick_commit(struct repository *r,
 		base_label = msg.parent_label;
 		next = commit;
 		next_label = msg.label;
-
 		strbuf_reset(&ctx->message);
+		msg_buf = &ctx->message;
 		/* Append the commit log message to ctx->message. */
 		if (find_commit_subject(msg.message, &p))
 			strbuf_addstr(&ctx->message, p);
@@ -2395,11 +2393,12 @@ static int do_pick_commit(struct repository *r,
 		 command == TODO_REVERT) {
 		res = do_recursive_merge(r, base, next, base_label, next_label,
 					 &head, &ctx->message, opts);
-		if (res < 0)
+		if (res < 0) {
 			goto leave;
-
-		res |= write_message(ctx->message.buf, ctx->message.len,
-				     git_path_merge_msg(r), 0);
+		} else if (!is_rebase_i(opts) && (res || opts->no_commit)) {
+			res |= write_message(ctx->message.buf, ctx->message.len,
+					     git_path_merge_msg(r), 0);
+		}
 	} else {
 		struct commit_list *common = NULL;
 		struct commit_list *remotes = NULL;
@@ -2412,6 +2411,18 @@ static int do_pick_commit(struct repository *r,
 		res |= try_merge_command(r, opts->strategy,
 					 opts->xopts.nr, opts->xopts.v,
 					common, oid_to_hex(&head), remotes);
+		/*
+		 * Read the commit message back in in case the merge
+		 * strategy appended conflict comments to it.
+		 */
+		strbuf_reset(&ctx->message);
+		if (strbuf_read_file(&ctx->message, git_path_merge_msg(r),
+				     4096) < 0)
+			res = error_errno(_("could not read '%s'"),
+					  git_path_merge_msg(r));
+		if (is_rebase_i(opts) || !(res || opts->no_commit))
+			unlink(git_path_merge_msg(r));
+
 		free_commit_list(common);
 		free_commit_list(remotes);
 	}
@@ -2454,7 +2465,6 @@ static int do_pick_commit(struct repository *r,
 		drop_commit = 1;
 		refs_delete_ref(get_main_ref_store(r), "", "CHERRY_PICK_HEAD",
 				NULL, 0);
-		unlink(git_path_merge_msg(r));
 		unlink(git_path_auto_merge(r));
 		fprintf(stderr,
 			_("dropping %s %s -- patch contents already upstream\n"),
@@ -2462,7 +2472,8 @@ static int do_pick_commit(struct repository *r,
 	} /* else allow == 0 and there's nothing special to do */
 	if (!opts->no_commit && !drop_commit) {
 		if (author || command == TODO_REVERT || (flags & AMEND_MSG))
-			res = do_commit(r, msg_file, author, opts, flags,
+			res = do_commit(r, msg_buf, msg_file,  author, opts,
+					flags,
 					commit? &commit->object.oid : NULL);
 		else
 			res = error(_("unable to parse commit author"));
