@@ -2116,15 +2116,11 @@ static int update_squash_messages(struct repository *r,
 				    0);
 	strbuf_release(&buf);
 
-	if (!res) {
+	if (!res)
 		strbuf_addf(&ctx->current_fixups, "%s%s %s",
 			    ctx->current_fixups.len ? "\n" : "",
 			    command_to_string(command),
 			    oid_to_hex(&commit->object.oid));
-		res = write_message(ctx->current_fixups.buf,
-				    ctx->current_fixups.len,
-				    rebase_path_current_fixups(), 0);
-	}
 
 	return res;
 }
@@ -2468,7 +2464,6 @@ fast_forward_edit:
 	if (!res && final_fixup) {
 		unlink(rebase_path_fixup_msg());
 		unlink(rebase_path_squash_msg());
-		unlink(rebase_path_current_fixups());
 		strbuf_reset(&ctx->current_fixups);
 		ctx->current_fixup_count = 0;
 	}
@@ -4494,6 +4489,25 @@ static int is_final_fixup(struct todo_list *todo_list)
 	return 1;
 }
 
+static int write_fixup_state(struct replay_ctx *ctx)
+{
+	int ret = 0;
+
+	if (ctx->current_fixup_count) {
+		if (write_message(ctx->current_fixups.buf,
+				  ctx->current_fixups.len,
+				  rebase_path_current_fixups(), 0))
+			ret = error(_("could not write '%s'"),
+				    rebase_path_current_fixups());
+	} else {
+		if (unlink(rebase_path_current_fixups()) && errno != ENOENT)
+			ret = error_errno(_("could not remove '%s'"),
+					   rebase_path_current_fixups());
+	}
+
+	return ret;
+}
+
 static enum todo_command peek_command(struct todo_list *todo_list, int offset)
 {
 	int i;
@@ -4766,9 +4780,9 @@ static int pick_one_commit(struct repository *r,
 	return res;
 }
 
-static int pick_commits(struct repository *r,
-			struct todo_list *todo_list,
-			struct replay_opts *opts)
+static int do_pick_commits(struct repository *r,
+			   struct todo_list *todo_list,
+			   struct replay_opts *opts)
 {
 	struct replay_ctx *ctx = opts->ctx;
 	int res = 0, reschedule = 0;
@@ -4999,6 +5013,21 @@ cleanup_head_ref:
 	return sequencer_remove_state(opts);
 }
 
+static int pick_commits(struct repository *r,
+			struct todo_list *todo_list,
+			struct replay_opts *opts)
+{
+	struct replay_ctx *ctx = opts->ctx;
+	int res = do_pick_commits(r, todo_list, opts);
+
+	if (todo_list->current < todo_list->nr) {
+		if (is_rebase_i(opts) && write_fixup_state(ctx))
+			res = -1;
+	}
+
+	return res;
+}
+
 static int continue_single_pick(struct repository *r, struct replay_opts *opts)
 {
 	struct child_process cmd = CHILD_PROCESS_INIT;
@@ -5075,7 +5104,6 @@ static int commit_staged_changes(struct repository *r,
 			if (!is_fixup(peek_command(todo_list, 0))) {
 				unlink(rebase_path_fixup_msg());
 				unlink(rebase_path_squash_msg());
-				unlink(rebase_path_current_fixups());
 				strbuf_reset(&ctx->current_fixups);
 				ctx->current_fixup_count = 0;
 			}
@@ -5090,10 +5118,6 @@ static int commit_staged_changes(struct repository *r,
 			while (len && p[len - 1] != '\n')
 				len--;
 			strbuf_setlen(&ctx->current_fixups, len);
-			if (write_message(p, len, rebase_path_current_fixups(),
-					  0) < 0)
-				return error(_("could not write file: '%s'"),
-					     rebase_path_current_fixups());
 
 			/*
 			 * If a fixup/squash in a fixup/squash chain failed, the
@@ -5183,7 +5207,6 @@ static int commit_staged_changes(struct repository *r,
 		 * Whether final fixup or not, we just cleaned up the commit
 		 * message...
 		 */
-		unlink(rebase_path_current_fixups());
 		strbuf_reset(&ctx->current_fixups);
 		ctx->current_fixup_count = 0;
 	}
