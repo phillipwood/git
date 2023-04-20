@@ -211,6 +211,10 @@ struct replay_ctx {
 	 */
 	struct strbuf message;
 	/*
+	 * The message used for fixups ...
+	 */
+	struct strbuf fixup_msg;
+	/*
 	 * The list of fixup and squash commands in the current
 	 * chain that have been completed.
 	 */
@@ -230,6 +234,10 @@ struct replay_ctx {
 	 * Is message valid.
 	 */
 	unsigned have_message :1;
+	/*
+	 * Do we have a fixup message.
+	 */
+	unsigned have_fixup_msg :1;
 };
 
 struct replay_ctx* replay_ctx_new(void)
@@ -238,6 +246,7 @@ struct replay_ctx* replay_ctx_new(void)
 
 	strbuf_init(&ctx->current_fixups, 0);
 	strbuf_init(&ctx->message, 0);
+	strbuf_init(&ctx->fixup_msg, 0);
 
 	return ctx;
 }
@@ -410,6 +419,7 @@ static void replay_ctx_release(struct replay_ctx *ctx)
 {
 	strbuf_release(&ctx->current_fixups);
 	strbuf_release(&ctx->message);
+	strbuf_release(&ctx->fixup_msg);
 }
 
 void replay_opts_release(struct replay_opts *opts)
@@ -1989,12 +1999,11 @@ static void update_squash_message_for_fixup(struct strbuf *msg)
 	strbuf_release(&buf2);
 }
 
-static int append_squash_message(struct strbuf *buf, const char *body,
-			 enum todo_command command, struct replay_opts *opts,
-			 unsigned flag)
+static void append_squash_message(struct strbuf *buf, const char *body,
+				  enum todo_command command,
+				  struct replay_opts *opts, unsigned flag)
 {
 	struct replay_ctx *ctx = opts->ctx;
-	const char *fixup_msg;
 	size_t commented_len = 0, fixup_off;
 	/*
 	 * amend is non-interactive and not normally used with fixup!
@@ -2027,21 +2036,18 @@ static int append_squash_message(struct strbuf *buf, const char *body,
 
 		if ((command == TODO_FIXUP) &&
 		    (flag & TODO_REPLACE_FIXUP_MSG) &&
-		    (file_exists(rebase_path_fixup_msg()) ||
+		    (ctx->have_fixup_msg ||
 		     !file_exists(rebase_path_squash_msg()))) {
-			fixup_msg = skip_blank_lines(buf->buf + fixup_off);
-			if (write_message(fixup_msg, strlen(fixup_msg),
-					rebase_path_fixup_msg(), 0) < 0)
-				return error(_("cannot write '%s'"),
-					rebase_path_fixup_msg());
+			strbuf_reset(&ctx->fixup_msg);
+			strbuf_addstr(&ctx->fixup_msg,
+				      skip_blank_lines(buf->buf + fixup_off));
+			ctx->have_fixup_msg = 1;
 		} else {
-			unlink(rebase_path_fixup_msg());
+			ctx->have_fixup_msg = 0;
 		}
 	} else  {
-		unlink(rebase_path_fixup_msg());
+		ctx->have_fixup_msg = 0;
 	}
-
-	return 0;
 }
 
 static int update_squash_messages(struct repository *r,
@@ -2088,10 +2094,10 @@ static int update_squash_messages(struct repository *r,
 			return error(_("could not read HEAD's commit message"));
 
 		find_commit_subject(head_message, &body);
-		if (command == TODO_FIXUP && !flag && write_message(body, strlen(body),
-							rebase_path_fixup_msg(), 0) < 0) {
-			repo_unuse_commit_buffer(r, head_commit, head_message);
-			return error(_("cannot write '%s'"), rebase_path_fixup_msg());
+		if (command == TODO_FIXUP && !flag) {
+			strbuf_reset(&ctx->fixup_msg);
+			strbuf_addstr(&ctx->fixup_msg, body);
+			ctx->have_fixup_msg = 1;
 		}
 		strbuf_addf(&buf, "%c ", comment_line_char);
 		strbuf_addf(&buf, _(combined_commit_msg_fmt), 2);
@@ -2115,7 +2121,7 @@ static int update_squash_messages(struct repository *r,
 	find_commit_subject(message, &body);
 
 	if (command == TODO_SQUASH || is_fixup_flag(command, flag)) {
-		res = append_squash_message(&buf, body, command, opts, flag);
+		append_squash_message(&buf, body, command, opts, flag);
 	} else if (command == TODO_FIXUP) {
 		strbuf_addf(&buf, "\n%c ", comment_line_char);
 		strbuf_addf(&buf, _(skip_nth_commit_msg_fmt),
@@ -2367,9 +2373,11 @@ static int do_pick_commit(struct repository *r,
 		flags |= AMEND_MSG;
 		if (!final_fixup)
 			msg_file = rebase_path_squash_msg();
-		else if (file_exists(rebase_path_fixup_msg())) {
+		else if (ctx->have_fixup_msg) {
 			flags |= VERBATIM_MSG;
 			msg_file = rebase_path_fixup_msg();
+			write_message(ctx->fixup_msg.buf, ctx->fixup_msg.len,
+				      msg_file, 0);
 		} else {
 			const char *dest = git_path_squash_msg(r);
 			unlink(dest);
@@ -2383,6 +2391,8 @@ static int do_pick_commit(struct repository *r,
 			flags |= EDIT_MSG;
 		}
 	}
+
+	assert(!ctx->have_fixup_msg || ctx->current_fixup_count);
 
 	if (opts->signoff && !is_fixup(command))
 		append_signoff(&ctx->message, 0, 0);
@@ -2478,7 +2488,7 @@ fast_forward_edit:
 
 
 	if (!res && final_fixup) {
-		unlink(rebase_path_fixup_msg());
+		ctx->have_fixup_msg = 0;
 		unlink(rebase_path_squash_msg());
 		strbuf_reset(&ctx->current_fixups);
 		ctx->current_fixup_count = 0;
@@ -3109,6 +3119,16 @@ static int read_populate_opts(struct replay_opts *opts)
 				ctx->current_fixup_count++;
 				p++;
 			}
+		}
+
+		if (ctx->current_fixup_count) {
+			if (strbuf_read_file(&ctx->fixup_msg,
+					     rebase_path_fixup_msg(),
+					     4096) >= 0)
+				ctx->have_fixup_msg = 1;
+			else if (errno != ENOENT)
+				ret = error_errno(_("could not read '%s'"),
+						  rebase_path_fixup_msg());
 		}
 
 		if (read_oneliner(&buf, rebase_path_squash_onto(), 0)) {
@@ -4514,10 +4534,24 @@ static int write_fixup_state(struct replay_ctx *ctx)
 				  rebase_path_current_fixups(), 0))
 			ret = error(_("could not write '%s'"),
 				    rebase_path_current_fixups());
+
+		if (ctx->have_fixup_msg) {
+			if (write_message(ctx->fixup_msg.buf,
+					  ctx->fixup_msg.len,
+					  rebase_path_fixup_msg(), 0))
+				ret = error(_("could not write '%s'"),
+					    rebase_path_fixup_msg());
+		}
 	} else {
+		assert(!ctx->have_fixup_msg);
+
 		if (unlink(rebase_path_current_fixups()) && errno != ENOENT)
 			ret = error_errno(_("could not remove '%s'"),
 					   rebase_path_current_fixups());
+
+		if (unlink(rebase_path_fixup_msg()) && errno != ENOENT)
+			ret = error_errno(_("could not remove '%s'"),
+					  rebase_path_current_fixups());
 	}
 
 	return ret;
@@ -5119,7 +5153,7 @@ static int commit_staged_changes(struct repository *r,
 			 !file_exists(rebase_path_stopped_sha())) {
 			/* was a final fixup or squash done manually? */
 			if (!is_fixup(peek_command(todo_list, 0))) {
-				unlink(rebase_path_fixup_msg());
+				ctx->have_fixup_msg = 0;
 				unlink(rebase_path_squash_msg());
 				strbuf_reset(&ctx->current_fixups);
 				ctx->current_fixup_count = 0;
@@ -5216,7 +5250,7 @@ static int commit_staged_changes(struct repository *r,
 	unlink(git_path_merge_head(r));
 	unlink(git_path_auto_merge(r));
 	if (final_fixup) {
-		unlink(rebase_path_fixup_msg());
+		ctx->have_fixup_msg = 0;
 		unlink(rebase_path_squash_msg());
 	}
 	if (ctx->current_fixup_count > 0) {
