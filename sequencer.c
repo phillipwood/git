@@ -1999,8 +1999,7 @@ static void update_squash_message_for_fixup(struct strbuf *msg)
 	strbuf_release(&buf2);
 }
 
-static void append_squash_message(struct strbuf *buf, const char *body,
-				  enum todo_command command,
+static void append_squash_message(const char *body, enum todo_command command,
 				  struct replay_opts *opts, unsigned flag)
 {
 	struct replay_ctx *ctx = opts->ctx;
@@ -2015,14 +2014,15 @@ static void append_squash_message(struct strbuf *buf, const char *body,
 	     (starts_with(body, "squash!") || starts_with(body, "fixup!"))))
 		commented_len = commit_subject_length(body);
 
-	strbuf_addf(buf, "\n%c ", comment_line_char);
-	strbuf_addf(buf, _(nth_commit_msg_fmt),
+	strbuf_addf(&ctx->message, "\n%c ", comment_line_char);
+	strbuf_addf(&ctx->message, _(nth_commit_msg_fmt),
 		    ++ctx->current_fixup_count + 1);
-	strbuf_addstr(buf, "\n\n");
-	strbuf_add_commented_lines(buf, body, commented_len, comment_line_char);
+	strbuf_addstr(&ctx->message, "\n\n");
+	strbuf_add_commented_lines(&ctx->message, body, commented_len,
+				   comment_line_char);
 	/* buf->buf may be reallocated so store an offset into the buffer */
-	fixup_off = buf->len;
-	strbuf_addstr(buf, body + commented_len);
+	fixup_off = ctx->message.len;
+	strbuf_addstr(&ctx->message, body + commented_len);
 
 	/* fixup -C after squash behaves like squash */
 	if (is_fixup_flag(command, flag) && !seen_squash(ctx)) {
@@ -2032,15 +2032,14 @@ static void append_squash_message(struct strbuf *buf, const char *body,
 		 * requested '--signoff'.
 		 */
 		if (opts->signoff)
-			append_signoff(buf, 0, 0);
+			append_signoff(&ctx->message, 0, 0);
 
 		if ((command == TODO_FIXUP) &&
 		    (flag & TODO_REPLACE_FIXUP_MSG) &&
-		    (ctx->have_fixup_msg ||
-		     !file_exists(rebase_path_squash_msg()))) {
+		    (ctx->have_fixup_msg || ctx->current_fixup_count == 1)) {
 			strbuf_reset(&ctx->fixup_msg);
 			strbuf_addstr(&ctx->fixup_msg,
-				      skip_blank_lines(buf->buf + fixup_off));
+				      skip_blank_lines(ctx->message.buf + fixup_off));
 			ctx->have_fixup_msg = 1;
 		} else {
 			ctx->have_fixup_msg = 0;
@@ -2057,8 +2056,6 @@ static int update_squash_messages(struct repository *r,
 				  unsigned flag)
 {
 	struct replay_ctx *ctx = opts->ctx;
-	struct strbuf buf = STRBUF_INIT;
-	int res = 0;
 	const char *message, *body;
 	const char *encoding = get_commit_output_encoding();
 
@@ -2066,25 +2063,22 @@ static int update_squash_messages(struct repository *r,
 		struct strbuf header = STRBUF_INIT;
 		char *eol;
 
-		if (strbuf_read_file(&buf, rebase_path_squash_msg(), 9) <= 0)
-			return error(_("could not read '%s'"),
-				rebase_path_squash_msg());
-
-		eol = buf.buf[0] != comment_line_char ?
-			buf.buf : strchrnul(buf.buf, '\n');
+		eol = ctx->message.buf[0] != comment_line_char ?
+			ctx->message.buf : strchrnul(ctx->message.buf, '\n');
 
 		strbuf_addf(&header, "%c ", comment_line_char);
 		strbuf_addf(&header, _(combined_commit_msg_fmt),
 			    ctx->current_fixup_count + 2);
-		strbuf_splice(&buf, 0, eol - buf.buf, header.buf, header.len);
+		strbuf_splice(&ctx->message, 0, eol - ctx->message.buf, header.buf, header.len);
 		strbuf_release(&header);
 		if (is_fixup_flag(command, flag) && !seen_squash(ctx))
-			update_squash_message_for_fixup(&buf);
+			update_squash_message_for_fixup(&ctx->message);
 	} else {
 		struct object_id head;
 		struct commit *head_commit;
 		const char *head_message, *body;
 
+		strbuf_reset(&ctx->message);
 		if (repo_get_oid(r, "HEAD", &head))
 			return error(_("need a HEAD to fixup"));
 		if (!(head_commit = lookup_commit_reference(r, &head)))
@@ -2099,18 +2093,18 @@ static int update_squash_messages(struct repository *r,
 			strbuf_addstr(&ctx->fixup_msg, body);
 			ctx->have_fixup_msg = 1;
 		}
-		strbuf_addf(&buf, "%c ", comment_line_char);
-		strbuf_addf(&buf, _(combined_commit_msg_fmt), 2);
-		strbuf_addf(&buf, "\n%c ", comment_line_char);
-		strbuf_addstr(&buf, is_fixup_flag(command, flag) ?
+		strbuf_addf(&ctx->message, "%c ", comment_line_char);
+		strbuf_addf(&ctx->message, _(combined_commit_msg_fmt), 2);
+		strbuf_addf(&ctx->message, "\n%c ", comment_line_char);
+		strbuf_addstr(&ctx->message, is_fixup_flag(command, flag) ?
 			      _(skip_first_commit_msg_str) :
 			      _(first_commit_msg_str));
-		strbuf_addstr(&buf, "\n\n");
+		strbuf_addstr(&ctx->message, "\n\n");
 		if (is_fixup_flag(command, flag))
-			strbuf_add_commented_lines(&buf, body, strlen(body),
-						   comment_line_char);
+			strbuf_add_commented_lines(&ctx->message, body,
+					strlen(body), comment_line_char);
 		else
-			strbuf_addstr(&buf, body);
+			strbuf_addstr(&ctx->message, body);
 
 		repo_unuse_commit_buffer(r, head_commit, head_message);
 	}
@@ -2121,30 +2115,24 @@ static int update_squash_messages(struct repository *r,
 	find_commit_subject(message, &body);
 
 	if (command == TODO_SQUASH || is_fixup_flag(command, flag)) {
-		append_squash_message(&buf, body, command, opts, flag);
+		append_squash_message(body, command, opts, flag);
 	} else if (command == TODO_FIXUP) {
-		strbuf_addf(&buf, "\n%c ", comment_line_char);
-		strbuf_addf(&buf, _(skip_nth_commit_msg_fmt),
+		strbuf_addf(&ctx->message, "\n%c ", comment_line_char);
+		strbuf_addf(&ctx->message, _(skip_nth_commit_msg_fmt),
 			    ++ctx->current_fixup_count + 1);
-		strbuf_addstr(&buf, "\n\n");
-		strbuf_add_commented_lines(&buf, body, strlen(body),
+		strbuf_addstr(&ctx->message, "\n\n");
+		strbuf_add_commented_lines(&ctx->message, body, strlen(body),
 					   comment_line_char);
 	} else
 		return error(_("unknown command: %d"), command);
 	repo_unuse_commit_buffer(r, commit, message);
 
-	if (!res)
-		res = write_message(buf.buf, buf.len, rebase_path_squash_msg(),
-				    0);
-	strbuf_release(&buf);
+	strbuf_addf(&ctx->current_fixups, "%s%s %s",
+		    ctx->current_fixups.len ? "\n" : "",
+		    command_to_string(command),
+		    oid_to_hex(&commit->object.oid));
 
-	if (!res)
-		strbuf_addf(&ctx->current_fixups, "%s%s %s",
-			    ctx->current_fixups.len ? "\n" : "",
-			    command_to_string(command),
-			    oid_to_hex(&commit->object.oid));
-
-	return res;
+	return 0;
 }
 
 static void flush_rewritten_pending(void)
@@ -2321,9 +2309,10 @@ static int do_pick_commit(struct repository *r,
 		base_label = msg.label;
 		next = parent;
 		next_label = msg.parent_label;
+		strbuf_reset(&ctx->message);
 		if (opts->commit_use_reference) {
 			strbuf_addstr(&ctx->message,
-				"# *** SAY WHY WE ARE REVERTING ON THE TITLE LINE ***");
+				      "# *** SAY WHY WE ARE REVERTING ON THE TITLE LINE ***");
 		} else {
 			strbuf_addstr(&ctx->message, "Revert \"");
 			strbuf_addstr(&ctx->message, msg.subject);
@@ -2337,6 +2326,34 @@ static int do_pick_commit(struct repository *r,
 			refer_to_commit(opts, &ctx->message, parent);
 		}
 		strbuf_addstr(&ctx->message, ".\n");
+	} else if (is_fixup(command)) {
+		base = parent;
+		base_label = msg.parent_label;
+		next = commit;
+		next_label = msg.label;
+
+		if (update_squash_messages(r, command, commit,
+					   opts, item->flags)) {
+			res = -1;
+			goto leave;
+		}
+		flags |= AMEND_MSG;
+		if (!final_fixup) {
+			msg_file = rebase_path_squash_msg();
+			write_message(ctx->message.buf, ctx->message.len,
+				      msg_file, 0);
+		} else if (ctx->have_fixup_msg) {
+			flags |= VERBATIM_MSG;
+			msg_file = rebase_path_fixup_msg();
+			write_message(ctx->fixup_msg.buf, ctx->fixup_msg.len,
+				      msg_file, 0);
+		} else {
+			msg_file = git_path_squash_msg(r);
+			write_message(ctx->message.buf, ctx->message.len,
+				      msg_file, 0);
+			unlink(git_path_merge_msg(r));
+			flags |= EDIT_MSG;
+		}
 	} else {
 		const char *p;
 
@@ -2345,6 +2362,7 @@ static int do_pick_commit(struct repository *r,
 		next = commit;
 		next_label = msg.label;
 
+		strbuf_reset(&ctx->message);
 		/* Append the commit log message to ctx->message. */
 		if (find_commit_subject(msg.message, &p))
 			strbuf_addstr(&ctx->message, p);
@@ -2357,45 +2375,17 @@ static int do_pick_commit(struct repository *r,
 			strbuf_addstr(&ctx->message, oid_to_hex(&commit->object.oid));
 			strbuf_addstr(&ctx->message, ")\n");
 		}
-		if (!is_fixup(command))
-			author = get_author(msg.message);
+		author = get_author(msg.message);
+
+		if (command == TODO_REWORD)
+			reword = 1;
+
+		if (opts->signoff)
+			append_signoff(&ctx->message, 0, 0);
 	}
 	ctx->have_message = 1;
 
-	if (command == TODO_REWORD)
-		reword = 1;
-	else if (is_fixup(command)) {
-		if (update_squash_messages(r, command, commit,
-					   opts, item->flags)) {
-			res = -1;
-			goto leave;
-		}
-		flags |= AMEND_MSG;
-		if (!final_fixup)
-			msg_file = rebase_path_squash_msg();
-		else if (ctx->have_fixup_msg) {
-			flags |= VERBATIM_MSG;
-			msg_file = rebase_path_fixup_msg();
-			write_message(ctx->fixup_msg.buf, ctx->fixup_msg.len,
-				      msg_file, 0);
-		} else {
-			const char *dest = git_path_squash_msg(r);
-			unlink(dest);
-			if (copy_file(dest, rebase_path_squash_msg(), 0666)) {
-				res = error(_("could not rename '%s' to '%s'"),
-					    rebase_path_squash_msg(), dest);
-				goto leave;
-			}
-			unlink(git_path_merge_msg(r));
-			msg_file = dest;
-			flags |= EDIT_MSG;
-		}
-	}
-
 	assert(!ctx->have_fixup_msg || ctx->current_fixup_count);
-
-	if (opts->signoff && !is_fixup(command))
-		append_signoff(&ctx->message, 0, 0);
 
 	if (is_rebase_i(opts) && write_author_script(msg.message) < 0)
 		res = -1;
@@ -2489,7 +2479,6 @@ fast_forward_edit:
 
 	if (!res && final_fixup) {
 		ctx->have_fixup_msg = 0;
-		unlink(rebase_path_squash_msg());
 		strbuf_reset(&ctx->current_fixups);
 		ctx->current_fixup_count = 0;
 	}
@@ -3129,6 +3118,14 @@ static int read_populate_opts(struct replay_opts *opts)
 			else if (errno != ENOENT)
 				ret = error_errno(_("could not read '%s'"),
 						  rebase_path_fixup_msg());
+
+			if (strbuf_read_file(&ctx->message,
+					     rebase_path_squash_msg(),
+				     4096) >= 0)
+				ctx->have_message = 1;
+			else if (errno != ENOENT)
+				ret = error_errno(_("could not read '%s'"),
+						  rebase_path_squash_msg());
 		}
 
 		if (read_oneliner(&buf, rebase_path_squash_onto(), 0)) {
@@ -3643,14 +3640,27 @@ static int error_with_patch(struct repository *r,
 			    struct replay_opts *opts,
 			    int exit_code, int to_amend)
 {
+	struct replay_ctx *ctx = opts->ctx;
+
+	assert(exit_code || to_amend);
+
+	if (ctx->have_message) {
+		if (write_message(ctx->message.buf, ctx->message.len,
+				  rebase_path_message(), 0))
+			return -1;
+		/*
+		 * If exit_code is non-zero then we have not committed
+		 * and so .git/MERGE_MSG should exist.
+		 */
+		if (exit_code &&
+		    write_message(ctx->message.buf, ctx->message.len,
+				  git_path_merge_msg(r), 0))
+			return -1;
+	}
 	if (commit) {
 		if (make_patch(r, commit, opts))
 			return -1;
-	} else if (copy_file(rebase_path_message(),
-			     git_path_merge_msg(r), 0666))
-		return error(_("unable to copy '%s' to '%s'"),
-			     git_path_merge_msg(r), rebase_path_message());
-
+	}
 	if (to_amend) {
 		if (intend_to_amend())
 			return -1;
@@ -3686,14 +3696,6 @@ static int error_failed_squash(struct repository *r,
 			       int subject_len,
 			       const char *subject)
 {
-	if (copy_file(rebase_path_message(), rebase_path_squash_msg(), 0666))
-		return error(_("could not copy '%s' to '%s'"),
-			rebase_path_squash_msg(), rebase_path_message());
-	unlink(git_path_merge_msg(r));
-	if (copy_file(git_path_merge_msg(r), rebase_path_message(), 0666))
-		return error(_("could not copy '%s' to '%s'"),
-			     rebase_path_message(),
-			     git_path_merge_msg(r));
 	return error_with_patch(r, commit, subject, subject_len, opts, 1, 0);
 }
 
@@ -3988,6 +3990,7 @@ static int do_merge(struct repository *r,
 	static struct lock_file lock;
 	const char *p;
 
+	strbuf_reset(&ctx->message);
 	if (repo_hold_locked_index(r, &lock, LOCK_REPORT_ON_ERROR) < 0) {
 		ret = -1;
 		goto leave_merge;
@@ -4134,6 +4137,7 @@ static int do_merge(struct repository *r,
 			goto leave_merge;
 		}
 	}
+	ctx->have_message = 1;
 
 	if (strategy || to_merge->next) {
 		/* Octopus merge */
@@ -4542,6 +4546,11 @@ static int write_fixup_state(struct replay_ctx *ctx)
 				ret = error(_("could not write '%s'"),
 					    rebase_path_fixup_msg());
 		}
+
+		if (write_message(ctx->message.buf, ctx->message.len,
+				  rebase_path_squash_msg(), 0))
+			ret = error(_("could not write '%s'"),
+				      rebase_path_squash_msg());
 	} else {
 		assert(!ctx->have_fixup_msg);
 
@@ -4552,6 +4561,10 @@ static int write_fixup_state(struct replay_ctx *ctx)
 		if (unlink(rebase_path_fixup_msg()) && errno != ENOENT)
 			ret = error_errno(_("could not remove '%s'"),
 					  rebase_path_current_fixups());
+
+		if (unlink(rebase_path_squash_msg()) && errno != ENOENT)
+			ret = error_errno(_("could not remove '%s'"),
+					  rebase_path_squash_msg());
 	}
 
 	return ret;
@@ -4855,6 +4868,7 @@ static int do_pick_commits(struct repository *r,
 		const char *arg = todo_item_get_arg(todo_list, item);
 		int check_todo = 0;
 
+		ctx->have_message = 0;
 		if (save_todo(todo_list, opts, reschedule))
 			return -1;
 		if (is_rebase_i(opts)) {
@@ -4884,8 +4898,6 @@ static int do_pick_commits(struct repository *r,
 				return stopped_at_head(r);
 			}
 		}
-		strbuf_reset(&ctx->message);
-		ctx->have_message = 0;
 		if (item->command <= TODO_SQUASH) {
 			res = pick_one_commit(r, todo_list, opts, &check_todo,
 					      &reschedule);
@@ -5154,7 +5166,6 @@ static int commit_staged_changes(struct repository *r,
 			/* was a final fixup or squash done manually? */
 			if (!is_fixup(peek_command(todo_list, 0))) {
 				ctx->have_fixup_msg = 0;
-				unlink(rebase_path_squash_msg());
 				strbuf_reset(&ctx->current_fixups);
 				ctx->current_fixup_count = 0;
 			}
@@ -5201,7 +5212,6 @@ static int commit_staged_changes(struct repository *r,
 				int res = 0;
 				struct commit *commit;
 				const char *msg;
-				const char *path = rebase_path_squash_msg();
 				const char *encoding = get_commit_output_encoding();
 
 				if (parse_head(r, &commit))
@@ -5214,11 +5224,8 @@ static int commit_staged_changes(struct repository *r,
 					goto unuse_commit_buffer;
 				}
 				find_commit_subject(p, &msg);
-				if (write_message(msg, strlen(msg), path, 0)) {
-					res = error(_("could not write file: "
-						       "'%s'"), path);
-					goto unuse_commit_buffer;
-				}
+				strbuf_reset(&ctx->message);
+				strbuf_addstr(&ctx->message, msg);
 			unuse_commit_buffer:
 				repo_unuse_commit_buffer(r, commit, p);
 				if (res)
@@ -5249,10 +5256,9 @@ static int commit_staged_changes(struct repository *r,
 	unlink(rebase_path_amend());
 	unlink(git_path_merge_head(r));
 	unlink(git_path_auto_merge(r));
-	if (final_fixup) {
+	if (final_fixup)
 		ctx->have_fixup_msg = 0;
-		unlink(rebase_path_squash_msg());
-	}
+
 	if (ctx->current_fixup_count > 0) {
 		/*
 		 * Whether final fixup or not, we just cleaned up the commit
