@@ -1961,6 +1961,11 @@ static void todo_list_write_total_nr(const struct todo_list *todo_list)
 	todo_list_write_count(rebase_path_msgtotal(), todo_list->total_nr);
 }
 
+static void todo_list_write_done_nr(int done_nr)
+{
+	todo_list_write_count(rebase_path_msgnum(), done_nr);
+}
+
 static int save_todo(const struct todo_list *todo_list,
 		     struct replay_opts *opts)
 {
@@ -2005,6 +2010,7 @@ static int save_todo(const struct todo_list *todo_list,
 			ret = error_errno(_("could not write to '%s'"), done);
 		if (close(fd) < 0)
 			ret = error_errno(_("failed to finalize '%s'"), done);
+		todo_list_write_done_nr(todo_list->done_nr);
 	}
 	ctx->last_saved_command = next;
 
@@ -5053,6 +5059,9 @@ static int do_pick_commits(struct repository *r,
 	if (read_and_refresh_cache(r, opts))
 		return -1;
 
+	if (is_rebase_i(opts))
+		todo_list_write_done_nr(todo_list->done_nr + 1);
+
 	unlink(rebase_path_message());
 	unlink(rebase_path_stopped_sha());
 	unlink(rebase_path_amend());
@@ -5065,14 +5074,7 @@ static int do_pick_commits(struct repository *r,
 
 		if (is_rebase_i(opts)) {
 			if (item->command != TODO_COMMENT) {
-				FILE *f = fopen(rebase_path_msgnum(), "w");
-
 				todo_list->done_nr++;
-
-				if (f) {
-					fprintf(f, "%d\n", todo_list->done_nr);
-					fclose(f);
-				}
 				if (!opts->quiet)
 					fprintf(stderr, _("Rebasing (%d/%d)%s"),
 						todo_list->done_nr,
