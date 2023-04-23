@@ -232,6 +232,14 @@ struct replay_ctx {
 	 */
 	int current_fixup_count;
 	/*
+	 * items below pending_start have been rewritten. Items between
+	 * pending_start and nr are pending.
+	 */
+	struct rewritten_list {
+		struct { struct object_id old_oid, new_oid; } *items;
+		size_t alloc, nr, pending_start;
+	} rewritten;
+	/*
 	 * Is message valid.
 	 */
 	unsigned have_message :1;
@@ -435,6 +443,7 @@ static void replay_ctx_release(struct replay_ctx *ctx)
 	strbuf_release(&ctx->fixup_msg);
 	strbuf_release(&ctx->prev_message);
 	strbuf_release(&ctx->prev_fixup_msg);
+	free(ctx->rewritten.items);
 }
 
 void replay_opts_release(struct replay_opts *opts)
@@ -2312,44 +2321,73 @@ static int update_squash_messages(struct repository *r,
 	return 0;
 }
 
-static void flush_rewritten_pending(void)
+static int write_rewritten_list(struct repository *r, struct rewritten_list *l)
 {
-	struct strbuf buf = STRBUF_INIT;
-	struct object_id newoid;
+	int res = 0;
 	FILE *out;
 
-	if (strbuf_read_file(&buf, rebase_path_rewritten_pending(), (GIT_MAX_HEXSZ + 1) * 2) > 0 &&
-	    !repo_get_oid(the_repository, "HEAD", &newoid) &&
-	    (out = fopen_or_warn(rebase_path_rewritten_list(), "a"))) {
-		char *bol = buf.buf, *eol;
-
-		while (*bol) {
-			eol = strchrnul(bol, '\n');
-			fprintf(out, "%.*s %s\n", (int)(eol - bol),
-					bol, oid_to_hex(&newoid));
-			if (!*eol)
-				break;
-			bol = eol + 1;
+	if (l->pending_start) {
+		out = fopen_or_warn(rebase_path_rewritten_list(), "a");
+		if (out) {
+			for (size_t i = 0; i < l->pending_start; i++) {
+				fprintf(out, "%s %s\n",
+					oid_to_hex(&l->items[i].old_oid),
+					oid_to_hex(&l->items[i].new_oid));
+			}
+			res = ferror(out);
+			res |= fclose(out);
+		} else {
+			res = -1;
 		}
-		fclose(out);
-		unlink(rebase_path_rewritten_pending());
 	}
-	strbuf_release(&buf);
+	if (l->nr > l->pending_start) {
+		out = fopen_or_warn(rebase_path_rewritten_pending(), "w");
+		if (out) {
+			for (size_t i = l->pending_start; i < l->nr; i++) {
+				fprintf(out, "%s\n",
+					oid_to_hex(&l->items[i].old_oid));
+			}
+			res |= ferror(out);
+			res |= fclose(out);
+		} else {
+			res = -1;
+		}
+	} else if (unlink(rebase_path_rewritten_pending()) && errno != ENOENT) {
+		res = error_errno(_("could not remove '%s'"),
+				  rebase_path_rewritten_pending());
+	}
+
+	l->nr = l->nr - l->pending_start;
+	if (l->nr)
+		MOVE_ARRAY(l->items, l->items + l->pending_start, l->nr);
+	l->pending_start = 0;
+
+	return res;
 }
 
-static void record_in_rewritten(struct object_id *oid,
-		enum todo_command next_command)
+static void flush_rewritten_pending(struct repository *r,
+				    struct rewritten_list *l)
 {
-	FILE *out = fopen_or_warn(rebase_path_rewritten_pending(), "a");
+	struct object_id new_oid;
 
-	if (!out)
+	if (repo_get_oid(r, "HEAD", &new_oid))
 		return;
 
-	fprintf(out, "%s\n", oid_to_hex(oid));
-	fclose(out);
+	for (size_t i = l->pending_start; i < l->nr; i++)
+		oidcpy(&l->items[i].new_oid, &new_oid);
+
+	l->pending_start = l->nr;
+}
+
+static void record_in_rewritten(struct repository *r, struct rewritten_list *l,
+				struct object_id *oid,
+				enum todo_command next_command)
+{
+	ALLOC_GROW(l->items, l->nr + 1, l->alloc);
+	oidcpy(&l->items[l->nr++].old_oid, oid);
 
 	if (!is_fixup(next_command))
-		flush_rewritten_pending();
+		flush_rewritten_pending(r, l);
 }
 
 static int should_edit(struct replay_opts *opts) {
@@ -2653,6 +2691,7 @@ static int do_pick_commit(struct repository *r,
 	if (!opts->no_commit && !drop_commit) {
 		if (is_rebase_i(opts) && (flags & EDIT_MSG)) {
 			res = save_todo(todo_list, opts);
+			res |= write_rewritten_list(r, &ctx->rewritten);
 			if (res)
 				goto leave;
 			*check_todo = 1;
@@ -2667,6 +2706,7 @@ static int do_pick_commit(struct repository *r,
 fast_forward_edit:
 			if (is_rebase_i(opts) && !*check_todo) {
 				res = save_todo(todo_list, opts);
+				res |= write_rewritten_list(r, &ctx->rewritten);
 				if (res)
 					goto leave;
 				*check_todo = 1;
@@ -3139,6 +3179,34 @@ static int populate_opts_cb(const char *key, const char *value,
 	return 0;
 }
 
+static void read_rewritten_pending(struct rewritten_list *l, struct strbuf *buf)
+{
+	char *eol, *p, *next_p;
+
+	strbuf_reset(buf);
+	if (!read_oneliner(buf, rebase_path_rewritten_pending(),
+			   READ_ONELINER_SKIP_IF_EMPTY))
+		return;
+
+	p = buf->buf;
+	while (*p) {
+		eol = strchr(p, '\n');
+		if (eol) {
+			next_p = eol + 1;
+		} else {
+			eol = buf->buf + buf->len;
+			next_p = eol;
+		}
+		if (eol > buf->buf && *(eol - 1) == '\r')
+			eol--;
+		*eol = '\0';
+		ALLOC_GROW(l->items, l->nr + 1, l->alloc);
+		if (!get_oid_hex(p, &l->items[l->nr].old_oid))
+			l->nr++;
+		p = next_p;
+	}
+}
+
 static void parse_strategy_opts(struct replay_opts *opts, char *raw_opts)
 {
 	int i;
@@ -3375,6 +3443,8 @@ static int read_populate_opts(struct repository *r, struct replay_opts *opts)
 				ret = error_errno(_("could not read '%s'"),
 						  rebase_path_squash_msg());
 		}
+
+		read_rewritten_pending(&opts->ctx->rewritten, &buf);
 
 		if (read_oneliner(&buf, rebase_path_squash_onto(), 0)) {
 			if (repo_get_oid_committish(the_repository, buf.buf, &opts->squash_onto) < 0) {
@@ -5010,7 +5080,8 @@ static int pick_one_commit(struct repository *r,
 					arg, item->arg_len, opts, res, !res);
 	}
 	if (is_rebase_i(opts) && !res)
-		record_in_rewritten(&item->commit->object.oid,
+		record_in_rewritten(r, &ctx->rewritten,
+				    &item->commit->object.oid,
 				    peek_command(todo_list, 1));
 	if (res && is_fixup(item->command)) {
 		if (res == 1)
@@ -5139,7 +5210,8 @@ static int do_pick_commits(struct repository *r,
 					    todo_list)) < 0)
 				reschedule = 1;
 			else if (item->commit)
-				record_in_rewritten(&item->commit->object.oid,
+				record_in_rewritten(r, &ctx->rewritten,
+						    &item->commit->object.oid,
 						    peek_command(todo_list, 1));
 			if (res > 0)
 				/* failed with merge conflicts */
@@ -5243,7 +5315,8 @@ cleanup_head_ref:
 			}
 			release_revisions(&log_tree_opt);
 		}
-		flush_rewritten_pending();
+		flush_rewritten_pending(r, &ctx->rewritten);
+		write_rewritten_list(r, &ctx->rewritten);
 		if (!stat(rebase_path_rewritten_list(), &st) &&
 				st.st_size > 0) {
 			struct child_process child = CHILD_PROCESS_INIT;
@@ -5297,8 +5370,12 @@ static int pick_commits(struct repository *r,
 	if (todo_list->current < todo_list->nr) {
 		if (save_todo(todo_list, opts))
 			res = -1;
-		if (is_rebase_i(opts) && write_ctx(ctx))
-			res = -1;
+		if (is_rebase_i(opts)) {
+			if (write_ctx(ctx))
+				res = -1;
+			if (write_rewritten_list(r, &ctx->rewritten))
+				res = -1;
+		}
 	}
 
 	return res;
@@ -5528,7 +5605,8 @@ int sequencer_continue(struct repository *r, struct replay_opts *opts)
 		if (read_oneliner(&buf, rebase_path_stopped_sha(),
 				  READ_ONELINER_SKIP_IF_EMPTY) &&
 		    !get_oid_hex(buf.buf, &oid))
-			record_in_rewritten(&oid, peek_command(&todo_list, 0));
+			record_in_rewritten(r, &ctx->rewritten, &oid,
+					    peek_command(&todo_list, 0));
 		strbuf_release(&buf);
 	}
 
@@ -6303,9 +6381,11 @@ int todo_list_write_to_file(struct repository *r, struct todo_list *todo_list,
 
 /* skip picking commits whose parents are unchanged */
 static int skip_unnecessary_picks(struct repository *r,
+				  struct replay_opts *opts,
 				  struct todo_list *todo_list,
 				  struct object_id *base_oid)
 {
+	struct replay_ctx *ctx = opts->ctx;
 	struct object_id *parent_oid;
 	int i;
 
@@ -6343,7 +6423,8 @@ static int skip_unnecessary_picks(struct repository *r,
 		todo_list->done_nr += i;
 
 		if (is_fixup(peek_command(todo_list, 0)))
-			record_in_rewritten(base_oid, peek_command(todo_list, 0));
+			record_in_rewritten(r, &ctx->rewritten, base_oid,
+					    peek_command(todo_list, 0));
 	}
 
 	return 0;
@@ -6545,7 +6626,7 @@ int complete_action(struct repository *r, struct replay_opts *opts, unsigned fla
 		BUG("invalid todo list after expanding IDs:\n%s",
 		    new_todo.buf.buf);
 
-	if (opts->allow_ff && skip_unnecessary_picks(r, &new_todo, &oid)) {
+	if (opts->allow_ff && skip_unnecessary_picks(r, opts, &new_todo, &oid)) {
 		todo_list_release(&new_todo);
 		return error(_("could not skip unnecessary pick commands"));
 	}
