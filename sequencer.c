@@ -2358,9 +2358,9 @@ static void refer_to_commit(struct replay_opts *opts,
 }
 
 static int do_pick_commit(struct repository *r,
-			  struct todo_item *item,
+			  const struct todo_list *todo_list,
 			  struct replay_opts *opts,
-			  int final_fixup, int *check_todo)
+			  int *check_todo)
 {
 	struct replay_ctx *ctx = opts->ctx;
 	unsigned int flags = should_edit(opts) ? EDIT_MSG : 0;
@@ -2373,8 +2373,10 @@ static int do_pick_commit(struct repository *r,
 	char *author = NULL;
 	struct commit_message msg = { NULL, NULL, NULL, NULL };
 	int res, unborn = 0, reword = 0, allow, drop_commit;
+	const struct todo_item *item = &todo_list->items[todo_list->current];
 	enum todo_command command = item->command;
 	struct commit *commit = item->commit;
+	int final_fixup = is_final_fixup(todo_list);
 
 	if (opts->no_commit) {
 		/*
@@ -4954,8 +4956,7 @@ static int pick_one_commit(struct repository *r,
 		ctx->reflog_message = reflog_message(
 			opts, command_to_string(item->command), NULL);
 
-	res = do_pick_commit(r, item, opts, is_final_fixup(todo_list),
-			     check_todo);
+	res = do_pick_commit(r, todo_list, opts, check_todo);
 	if (is_rebase_i(opts) && res < 0) {
 		/* Reschedule */
 		*reschedule = 1;
@@ -5507,15 +5508,19 @@ static int single_pick(struct repository *r,
 		       struct commit *cmit,
 		       struct replay_opts *opts)
 {
-	int check_todo;
-	struct todo_item item;
+	int check_todo, ret;
+	struct todo_list todo_list = TODO_LIST_INIT;
+	struct todo_item *item = append_new_todo(&todo_list);
 
-	item.command = opts->action == REPLAY_PICK ?
+	item->command = opts->action == REPLAY_PICK ?
 			TODO_PICK : TODO_REVERT;
-	item.commit = cmit;
+	item->commit = cmit;
 
 	opts->ctx->reflog_message = sequencer_reflog_action(opts);
-	return do_pick_commit(r, &item, opts, 0, &check_todo);
+	ret = do_pick_commit(r, &todo_list, opts, &check_todo);
+	todo_list_release(&todo_list);
+
+	return ret;
 }
 
 int sequencer_pick_revisions(struct repository *r,
