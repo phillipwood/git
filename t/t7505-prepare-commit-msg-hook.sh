@@ -68,13 +68,6 @@ else
 	rebasing=0
 fi
 
-get_last_cmd () {
-	tail -n1 "$GIT_DIR/rebase-merge/done" | {
-		read cmd id _
-		git log --pretty="[$cmd %s]" -n1 $id
-	}
-}
-
 if test "$2" = commit
 then
 	if test $rebasing = 1
@@ -90,11 +83,32 @@ test "$GIT_EDITOR" = : && source="$source (no editor)"
 
 if test $rebasing = 1
 then
-	echo "$source $(get_last_cmd)" >"$1"
+	sed -n -e "
+		/Please enter the commit message for your changes/ b done
+		1 h
+		/commit message/ {
+			n
+			n
+			s/^# //
+			h
+		}
+		\$ b done
+		b
+		:done {
+			x
+			/^./ s/^/$source - /p
+			/^\$/ s//$source/p
+			q
+		}" "$1" >msg.tmp &&
+
+echo ---- && cat "$1" && echo ++++ && cat msg.tmp && echo ----
+
 else
 	sed -e "1s/.*/$source/" "$1" >msg.tmp
-	mv msg.tmp "$1"
 fi
+
+mv msg.tmp "$1"
+
 exit 0
 EOF
 '
@@ -217,6 +231,7 @@ test_rebase () {
 			git rebase --abort
 			git checkout -f main
 			git branch -D tmp" &&
+		test_config status.showuntrackedfiles no &&
 		git checkout -b tmp rebase-me &&
 		GIT_SEQUENCE_EDITOR="cp rebase-todo" &&
 		GIT_EDITOR="\"$FAKE_EDITOR\"" &&

@@ -225,6 +225,7 @@ struct replay_ctx {
 	 * free()'d.
 	 */
 	const char *reflog_message;
+	int last_saved_command;
 	/*
 	 * The number of fixup and squash commands in the current
 	 * chain that have been completed.
@@ -249,6 +250,7 @@ struct replay_ctx {
 	 * Is the current command a squash.
 	 */
 	unsigned pending_squash :1;
+	unsigned reschedule :1;
 };
 
 struct replay_ctx* replay_ctx_new(void)
@@ -1955,45 +1957,53 @@ static void todo_list_write_total_nr(const struct todo_list *todo_list)
 }
 
 static int save_todo(const struct todo_list *todo_list,
-		     struct replay_opts *opts, int reschedule)
+		     struct replay_opts *opts)
 {
+	struct replay_ctx *ctx = opts->ctx;
 	struct lock_file todo_lock = LOCK_INIT;
 	const char *todo_path = get_todo_path(opts);
 	int next = todo_list->current, offset, fd;
+	int last = ctx->last_saved_command;
+	int ret = 0;
 
 	/*
 	 * rebase -i writes "git-rebase-todo" without the currently executing
 	 * command, appending it to "done" instead.
 	 */
-	if (is_rebase_i(opts) && !reschedule)
+	if (is_rebase_i(opts) && !ctx->reschedule)
 		next++;
 
-	fd = hold_lock_file_for_update(&todo_lock, todo_path, 0);
-	if (fd < 0)
-		return error_errno(_("could not lock '%s'"), todo_path);
-	offset = get_item_line_offset(todo_list, next);
-	if (write_in_full(fd, todo_list->buf.buf + offset,
-			todo_list->buf.len - offset) < 0)
-		return error_errno(_("could not write to '%s'"), todo_path);
-	if (commit_lock_file(&todo_lock) < 0)
-		return error(_("failed to finalize '%s'"), todo_path);
+	if (last != next) {
+		fd = hold_lock_file_for_update(&todo_lock, todo_path, 0);
+		if (fd < 0)
+			return error_errno(_("could not lock '%s'"), todo_path);
+		offset = get_item_line_offset(todo_list, next);
+		if (write_in_full(fd, todo_list->buf.buf + offset,
+				  todo_list->buf.len - offset) < 0)
+			return error_errno(_("could not write to '%s'"), todo_path);
+		if (commit_lock_file(&todo_lock) < 0)
+			return error(_("failed to finalize '%s'"), todo_path);
+	}
 
-	if (is_rebase_i(opts) && !reschedule && next > 0) {
+	if (is_rebase_i(opts) && next + ctx->reschedule > last) {
 		const char *done = rebase_path_done();
 		int fd = open(done, O_CREAT | O_WRONLY | O_APPEND, 0666);
-		int ret = 0;
+		int cur = todo_list->current;
 
 		if (fd < 0)
 			return 0;
-		if (write_in_full(fd, get_item_line(todo_list, next - 1),
-				  get_item_line_length(todo_list, next - 1))
+		if (write_in_full(fd, get_item_line(todo_list, last),
+				  get_item_line_offset(todo_list, cur) +
+				  get_item_line_length(todo_list, cur) -
+				  get_item_line_offset(todo_list, last))
 		    < 0)
 			ret = error_errno(_("could not write to '%s'"), done);
 		if (close(fd) < 0)
 			ret = error_errno(_("failed to finalize '%s'"), done);
-		return ret;
 	}
-	return 0;
+	ctx->last_saved_command = next;
+
+	return ret;
 }
 
 static int is_final_fixup(const struct todo_list *todo_list)
@@ -2630,19 +2640,29 @@ static int do_pick_commit(struct repository *r,
 			oid_to_hex(&commit->object.oid), msg.subject);
 	} /* else allow == 0 and there's nothing special to do */
 	if (!opts->no_commit && !drop_commit) {
+		if (is_rebase_i(opts) && (flags & EDIT_MSG)) {
+			res = save_todo(todo_list, opts);
+			if (res)
+				goto leave;
+			*check_todo = 1;
+		}
 		if (author || command == TODO_REVERT || (flags & AMEND_MSG))
 			res = do_commit(r, msg_buf, msg_file,  author, opts,
 					flags,
 					commit? &commit->object.oid : NULL);
 		else
 			res = error(_("unable to parse commit author"));
-		*check_todo = !!(flags & EDIT_MSG);
 		if (!res && reword) {
 fast_forward_edit:
+			if (is_rebase_i(opts) && !*check_todo) {
+				res = save_todo(todo_list, opts);
+				if (res)
+					goto leave;
+				*check_todo = 1;
+			}
 			res = run_git_commit(NULL, opts, EDIT_MSG |
 					     VERIFY_MSG | AMEND_MSG |
 					     (flags & ALLOW_EMPTY));
-			*check_todo = 1;
 		}
 	}
 
@@ -4149,7 +4169,8 @@ cleanup:
 static int do_merge(struct repository *r,
 		    struct commit *commit,
 		    const char *arg, int arg_len,
-		    int flags, int *check_todo, struct replay_opts *opts)
+		    int flags, int *check_todo, struct replay_opts *opts,
+		    const struct todo_list *todo_list)
 {
 	struct replay_ctx *ctx = opts->ctx;
 	int run_commit_flags = 0;
@@ -4461,7 +4482,9 @@ static int do_merge(struct repository *r,
 	fast_forward_edit:
 		*check_todo = 1;
 		run_commit_flags |= AMEND_MSG | EDIT_MSG | VERIFY_MSG;
-		ret = !!run_git_commit(NULL, opts, run_commit_flags);
+		ret = save_todo(todo_list, opts);
+		if (!ret)
+			ret = !!run_git_commit(NULL, opts, run_commit_flags);
 	}
 
 
@@ -4912,6 +4935,7 @@ static int reread_todo_if_changed(struct repository *r,
 				  struct todo_list *todo_list,
 				  struct replay_opts *opts)
 {
+	struct replay_ctx *ctx = opts->ctx;
 	int offset;
 	struct strbuf buf = STRBUF_INIT;
 
@@ -4926,6 +4950,7 @@ static int reread_todo_if_changed(struct repository *r,
 			return -1; /* message was printed */
 		/* `current` will be incremented on return */
 		todo_list->current = -1;
+		ctx->last_saved_command = 0;
 	}
 	strbuf_release(&buf);
 
@@ -5033,8 +5058,6 @@ static int do_pick_commits(struct repository *r,
 		const char *arg = todo_item_get_arg(todo_list, item);
 		int check_todo = 0;
 
-		if (save_todo(todo_list, opts, reschedule))
-			return -1;
 		if (is_rebase_i(opts)) {
 			if (item->command != TODO_COMMENT) {
 				FILE *f = fopen(rebase_path_msgnum(), "w");
@@ -5086,6 +5109,8 @@ static int do_pick_commits(struct repository *r,
 			char *end_of_arg = (char *)(arg + item->arg_len);
 			int saved = *end_of_arg;
 
+			if (save_todo(todo_list, opts))
+				return -1;
 			if (!opts->verbose)
 				term_clear_line();
 			*end_of_arg = '\0';
@@ -5105,7 +5130,8 @@ static int do_pick_commits(struct repository *r,
 				reschedule = 1;
 		} else if (item->command == TODO_MERGE) {
 			if ((res = do_merge(r, item->commit, arg, item->arg_len,
-					    item->flags, &check_todo, opts)) < 0)
+					    item->flags, &check_todo, opts,
+					    todo_list)) < 0)
 				reschedule = 1;
 			else if (item->commit)
 				record_in_rewritten(&item->commit->object.oid,
@@ -5125,12 +5151,11 @@ static int do_pick_commits(struct repository *r,
 			return error(_("unknown command %d"), item->command);
 
 		if (reschedule) {
+			ctx->reschedule = 1;
 			advise(_(rescheduled_advice),
 			       get_item_line_length(todo_list,
 						    todo_list->current),
 			       get_item_line(todo_list, todo_list->current));
-			if (save_todo(todo_list, opts, reschedule))
-				return -1;
 			if (item->commit)
 				write_rebase_head(&item->commit->object.oid);
 		} else if (is_rebase_i(opts) && check_todo && !res &&
@@ -5260,9 +5285,13 @@ static int pick_commits(struct repository *r,
 			struct replay_opts *opts)
 {
 	struct replay_ctx *ctx = opts->ctx;
-	int res = do_pick_commits(r, todo_list, opts);
+	int res;
+
+	res = do_pick_commits(r, todo_list, opts);
 
 	if (todo_list->current < todo_list->nr) {
+		if (save_todo(todo_list, opts))
+			res = -1;
 		if (is_rebase_i(opts) && write_ctx(ctx))
 			res = -1;
 	}
@@ -5585,6 +5614,8 @@ int sequencer_pick_revisions(struct repository *r,
 	if (walk_revs_populate_todo(&todo_list, opts) ||
 			create_seq_dir(r) < 0)
 		return -1;
+	/* Force the todo list to be saved if we have to stop for conflicts. */
+	opts->ctx->last_saved_command = -1;
 	if (repo_get_oid(r, "HEAD", &oid) && (opts->action == REPLAY_REVERT))
 		return error(_("can't revert as initial commit"));
 	if (save_head(oid_to_hex(&oid)))
