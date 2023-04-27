@@ -1896,6 +1896,132 @@ static int is_pick_or_similar(enum todo_command command)
 	}
 }
 
+void todo_list_release(struct todo_list *todo_list)
+{
+	strbuf_release(&todo_list->buf);
+	FREE_AND_NULL(todo_list->items);
+	todo_list->nr = todo_list->alloc = 0;
+}
+
+static struct todo_item *append_new_todo(struct todo_list *todo_list)
+{
+	ALLOC_GROW(todo_list->items, todo_list->nr + 1, todo_list->alloc);
+	return memset(todo_list->items + todo_list->nr++,
+		      0, sizeof(*todo_list->items));
+}
+
+static int count_commands(struct todo_list *todo_list)
+{
+	int count = 0, i;
+
+	for (i = 0; i < todo_list->nr; i++)
+		if (todo_list->items[i].command != TODO_COMMENT)
+			count++;
+
+	return count;
+}
+
+const char *todo_item_get_arg(struct todo_list *todo_list,
+			      struct todo_item *item)
+{
+	return todo_list->buf.buf + item->arg_offset;
+}
+
+static int get_item_line_offset(struct todo_list *todo_list, int index)
+{
+	return index < todo_list->nr ?
+		todo_list->items[index].offset_in_buf : todo_list->buf.len;
+}
+
+static const char *get_item_line(struct todo_list *todo_list, int index)
+{
+	return todo_list->buf.buf + get_item_line_offset(todo_list, index);
+}
+
+static int get_item_line_length(struct todo_list *todo_list, int index)
+{
+	return get_item_line_offset(todo_list, index + 1)
+		-  get_item_line_offset(todo_list, index);
+}
+
+static void todo_list_write_total_nr(struct todo_list *todo_list)
+{
+	FILE *f = fopen_or_warn(rebase_path_msgtotal(), "w");
+
+	if (f) {
+		fprintf(f, "%d\n", todo_list->total_nr);
+		fclose(f);
+	}
+}
+
+static int save_todo(struct todo_list *todo_list, struct replay_opts *opts,
+		     int reschedule)
+{
+	struct lock_file todo_lock = LOCK_INIT;
+	const char *todo_path = get_todo_path(opts);
+	int next = todo_list->current, offset, fd;
+
+	/*
+	 * rebase -i writes "git-rebase-todo" without the currently executing
+	 * command, appending it to "done" instead.
+	 */
+	if (is_rebase_i(opts) && !reschedule)
+		next++;
+
+	fd = hold_lock_file_for_update(&todo_lock, todo_path, 0);
+	if (fd < 0)
+		return error_errno(_("could not lock '%s'"), todo_path);
+	offset = get_item_line_offset(todo_list, next);
+	if (write_in_full(fd, todo_list->buf.buf + offset,
+			todo_list->buf.len - offset) < 0)
+		return error_errno(_("could not write to '%s'"), todo_path);
+	if (commit_lock_file(&todo_lock) < 0)
+		return error(_("failed to finalize '%s'"), todo_path);
+
+	if (is_rebase_i(opts) && !reschedule && next > 0) {
+		const char *done = rebase_path_done();
+		int fd = open(done, O_CREAT | O_WRONLY | O_APPEND, 0666);
+		int ret = 0;
+
+		if (fd < 0)
+			return 0;
+		if (write_in_full(fd, get_item_line(todo_list, next - 1),
+				  get_item_line_length(todo_list, next - 1))
+		    < 0)
+			ret = error_errno(_("could not write to '%s'"), done);
+		if (close(fd) < 0)
+			ret = error_errno(_("failed to finalize '%s'"), done);
+		return ret;
+	}
+	return 0;
+}
+
+static int is_final_fixup(struct todo_list *todo_list)
+{
+	int i = todo_list->current;
+
+	if (!is_fixup(todo_list->items[i].command))
+		return 0;
+
+	while (++i < todo_list->nr)
+		if (is_fixup(todo_list->items[i].command))
+			return 0;
+		else if (!is_noop(todo_list->items[i].command))
+			break;
+	return 1;
+}
+
+static enum todo_command peek_command(struct todo_list *todo_list, int offset)
+{
+	int i;
+
+	for (i = todo_list->current + offset; i < todo_list->nr; i++)
+		if (!is_noop(todo_list->items[i].command))
+			return todo_list->items[i].command;
+
+	return -1;
+}
+
 enum todo_item_flags {
 	TODO_EDIT_MERGE_MSG    = (1 << 0),
 	TODO_REPLACE_FIXUP_MSG = (1 << 1),
@@ -2573,26 +2699,6 @@ static int read_and_refresh_cache(struct repository *r,
 	return 0;
 }
 
-void todo_list_release(struct todo_list *todo_list)
-{
-	strbuf_release(&todo_list->buf);
-	FREE_AND_NULL(todo_list->items);
-	todo_list->nr = todo_list->alloc = 0;
-}
-
-static struct todo_item *append_new_todo(struct todo_list *todo_list)
-{
-	ALLOC_GROW(todo_list->items, todo_list->nr + 1, todo_list->alloc);
-	return memset(todo_list->items + todo_list->nr++,
-		      0, sizeof(*todo_list->items));
-}
-
-const char *todo_item_get_arg(struct todo_list *todo_list,
-			      struct todo_item *item)
-{
-	return todo_list->buf.buf + item->arg_offset;
-}
-
 static int is_command(enum todo_command command, const char **bol)
 {
 	const char *str = todo_command_info[command].str;
@@ -2810,34 +2916,6 @@ int todo_list_parse_insn_buffer(struct repository *r, char *buf,
 	return res;
 }
 
-static int count_commands(struct todo_list *todo_list)
-{
-	int count = 0, i;
-
-	for (i = 0; i < todo_list->nr; i++)
-		if (todo_list->items[i].command != TODO_COMMENT)
-			count++;
-
-	return count;
-}
-
-static int get_item_line_offset(struct todo_list *todo_list, int index)
-{
-	return index < todo_list->nr ?
-		todo_list->items[index].offset_in_buf : todo_list->buf.len;
-}
-
-static const char *get_item_line(struct todo_list *todo_list, int index)
-{
-	return todo_list->buf.buf + get_item_line_offset(todo_list, index);
-}
-
-static int get_item_line_length(struct todo_list *todo_list, int index)
-{
-	return get_item_line_offset(todo_list, index + 1)
-		-  get_item_line_offset(todo_list, index);
-}
-
 static ssize_t strbuf_read_file_or_whine(struct strbuf *sb, const char *path)
 {
 	int fd;
@@ -2910,16 +2988,6 @@ void sequencer_post_commit_cleanup(struct repository *r, int verbose)
 		return;
 
 	sequencer_remove_state(&opts);
-}
-
-static void todo_list_write_total_nr(struct todo_list *todo_list)
-{
-	FILE *f = fopen_or_warn(rebase_path_msgtotal(), "w");
-
-	if (f) {
-		fprintf(f, "%d\n", todo_list->total_nr);
-		fclose(f);
-	}
 }
 
 static int read_populate_todo(struct repository *r,
@@ -3619,48 +3687,6 @@ give_advice:
 			 action == REPLAY_REVERT ? "revert" : "cherry-pick");
 	}
 	return -1;
-}
-
-static int save_todo(struct todo_list *todo_list, struct replay_opts *opts,
-		     int reschedule)
-{
-	struct lock_file todo_lock = LOCK_INIT;
-	const char *todo_path = get_todo_path(opts);
-	int next = todo_list->current, offset, fd;
-
-	/*
-	 * rebase -i writes "git-rebase-todo" without the currently executing
-	 * command, appending it to "done" instead.
-	 */
-	if (is_rebase_i(opts) && !reschedule)
-		next++;
-
-	fd = hold_lock_file_for_update(&todo_lock, todo_path, 0);
-	if (fd < 0)
-		return error_errno(_("could not lock '%s'"), todo_path);
-	offset = get_item_line_offset(todo_list, next);
-	if (write_in_full(fd, todo_list->buf.buf + offset,
-			todo_list->buf.len - offset) < 0)
-		return error_errno(_("could not write to '%s'"), todo_path);
-	if (commit_lock_file(&todo_lock) < 0)
-		return error(_("failed to finalize '%s'"), todo_path);
-
-	if (is_rebase_i(opts) && !reschedule && next > 0) {
-		const char *done = rebase_path_done();
-		int fd = open(done, O_CREAT | O_WRONLY | O_APPEND, 0666);
-		int ret = 0;
-
-		if (fd < 0)
-			return 0;
-		if (write_in_full(fd, get_item_line(todo_list, next - 1),
-				  get_item_line_length(todo_list, next - 1))
-		    < 0)
-			ret = error_errno(_("could not write to '%s'"), done);
-		if (close(fd) < 0)
-			ret = error_errno(_("failed to finalize '%s'"), done);
-		return ret;
-	}
-	return 0;
 }
 
 static int save_opts(struct replay_opts *opts)
@@ -4662,21 +4688,6 @@ static int do_update_refs(struct repository *r, int quiet)
 	return res;
 }
 
-static int is_final_fixup(struct todo_list *todo_list)
-{
-	int i = todo_list->current;
-
-	if (!is_fixup(todo_list->items[i].command))
-		return 0;
-
-	while (++i < todo_list->nr)
-		if (is_fixup(todo_list->items[i].command))
-			return 0;
-		else if (!is_noop(todo_list->items[i].command))
-			break;
-	return 1;
-}
-
 static int write_ctx(struct replay_ctx *ctx)
 {
 	int ret = 0;
@@ -4730,17 +4741,6 @@ static int write_ctx(struct replay_ctx *ctx)
 	strbuf_release(&buf);
 
 	return ret;
-}
-
-static enum todo_command peek_command(struct todo_list *todo_list, int offset)
-{
-	int i;
-
-	for (i = todo_list->current + offset; i < todo_list->nr; i++)
-		if (!is_noop(todo_list->items[i].command))
-			return todo_list->items[i].command;
-
-	return -1;
 }
 
 void create_autostash(struct repository *r, const char *path)
