@@ -1910,7 +1910,7 @@ static struct todo_item *append_new_todo(struct todo_list *todo_list)
 		      0, sizeof(*todo_list->items));
 }
 
-static int count_commands(struct todo_list *todo_list)
+static int count_commands(const struct todo_list *todo_list)
 {
 	int count = 0, i;
 
@@ -1921,30 +1921,30 @@ static int count_commands(struct todo_list *todo_list)
 	return count;
 }
 
-const char *todo_item_get_arg(struct todo_list *todo_list,
-			      struct todo_item *item)
+const char *todo_item_get_arg(const struct todo_list *todo_list,
+			      const struct todo_item *item)
 {
 	return todo_list->buf.buf + item->arg_offset;
 }
 
-static int get_item_line_offset(struct todo_list *todo_list, int index)
+static int get_item_line_offset(const struct todo_list *todo_list, int index)
 {
 	return index < todo_list->nr ?
 		todo_list->items[index].offset_in_buf : todo_list->buf.len;
 }
 
-static const char *get_item_line(struct todo_list *todo_list, int index)
+static const char *get_item_line(const struct todo_list *todo_list, int index)
 {
 	return todo_list->buf.buf + get_item_line_offset(todo_list, index);
 }
 
-static int get_item_line_length(struct todo_list *todo_list, int index)
+static int get_item_line_length(const struct todo_list *todo_list, int index)
 {
 	return get_item_line_offset(todo_list, index + 1)
 		-  get_item_line_offset(todo_list, index);
 }
 
-static void todo_list_write_total_nr(struct todo_list *todo_list)
+static void todo_list_write_total_nr(const struct todo_list *todo_list)
 {
 	FILE *f = fopen_or_warn(rebase_path_msgtotal(), "w");
 
@@ -1954,8 +1954,8 @@ static void todo_list_write_total_nr(struct todo_list *todo_list)
 	}
 }
 
-static int save_todo(struct todo_list *todo_list, struct replay_opts *opts,
-		     int reschedule)
+static int save_todo(const struct todo_list *todo_list,
+		     struct replay_opts *opts, int reschedule)
 {
 	struct lock_file todo_lock = LOCK_INIT;
 	const char *todo_path = get_todo_path(opts);
@@ -1996,7 +1996,7 @@ static int save_todo(struct todo_list *todo_list, struct replay_opts *opts,
 	return 0;
 }
 
-static int is_final_fixup(struct todo_list *todo_list)
+static int is_final_fixup(const struct todo_list *todo_list)
 {
 	int i = todo_list->current;
 
@@ -2011,7 +2011,7 @@ static int is_final_fixup(struct todo_list *todo_list)
 	return 1;
 }
 
-static enum todo_command peek_command(struct todo_list *todo_list, int offset)
+static enum todo_command peek_command(const struct todo_list *todo_list, int offset)
 {
 	int i;
 
@@ -4942,7 +4942,7 @@ N_("Could not execute the todo command\n"
 "    git rebase --continue\n");
 
 static int pick_one_commit(struct repository *r,
-			   struct todo_list *todo_list,
+			   const struct todo_list *todo_list,
 			   struct replay_opts *opts,
 			   int *check_todo, int* reschedule)
 {

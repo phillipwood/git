@@ -140,8 +140,8 @@ int todo_list_write_to_file(struct repository *r, struct todo_list *todo_list,
 			    const char *file, const char *shortrevisions,
 			    const char *shortonto, int num, unsigned flags);
 void todo_list_release(struct todo_list *todo_list);
-const char *todo_item_get_arg(struct todo_list *todo_list,
-			      struct todo_item *item);
+const char *todo_item_get_arg(const struct todo_list *todo_list,
+			      const struct todo_item *item);
 
 /*
  * Parse the update-refs file for the current rebase, then remove the
