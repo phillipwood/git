@@ -1946,14 +1946,19 @@ static int get_item_line_length(const struct todo_list *todo_list, int index)
 		-  get_item_line_offset(todo_list, index);
 }
 
-static void todo_list_write_total_nr(const struct todo_list *todo_list)
+static void todo_list_write_count(const char *path, int count)
 {
-	FILE *f = fopen_or_warn(rebase_path_msgtotal(), "w");
+	FILE *f = fopen_or_warn(path, "w");
 
 	if (f) {
-		fprintf(f, "%d\n", todo_list->total_nr);
+		fprintf(f, "%d\n", count);
 		fclose(f);
 	}
+}
+
+static void todo_list_write_total_nr(const struct todo_list *todo_list)
+{
+	todo_list_write_count(rebase_path_msgtotal(), todo_list->total_nr);
 }
 
 static int save_todo(const struct todo_list *todo_list,
