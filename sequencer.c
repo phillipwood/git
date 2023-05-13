@@ -3058,25 +3058,23 @@ static int read_populate_todo(struct repository *r,
 				return error(_("cannot cherry-pick during a revert."));
 			else
 				return error(_("cannot revert during a cherry-pick."));
-	}
+	} else {
+		struct strbuf buf = STRBUF_INIT;
 
-	if (is_rebase_i(opts)) {
-		struct todo_list done = TODO_LIST_INIT;
-
-		if (strbuf_read_file(&done.buf, rebase_path_done(), 0) > 0 &&
-		    !todo_list_parse_insn_buffer(r, done.buf.buf, &done))
-			todo_list->done_nr = count_commands(&done);
-		else
-			todo_list->done_nr = 0;
-
-		todo_list->total_nr = todo_list->done_nr
-			+ count_commands(todo_list);
-		todo_list_release(&done);
+		todo_list->done_nr = 0;
+		if (read_oneliner(&buf, rebase_path_msgnum(),
+				  READ_ONELINER_SKIP_IF_EMPTY)) {
+			if (strtol_i(buf.buf, 10, &todo_list->done_nr))
+				res = error(_("could not parse done_nr '%s'"),
+					    buf.buf);
+		}
+		todo_list->total_nr += todo_list->done_nr;
 
 		todo_list_write_total_nr(todo_list);
+		strbuf_release(&buf);
 	}
 
-	return 0;
+	return res;
 }
 
 static int git_config_string_dup(char **dest,
