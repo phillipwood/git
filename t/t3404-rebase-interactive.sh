@@ -1349,8 +1349,46 @@ test_expect_success 'rebase -i commits that overwrite untracked files (squash)' 
 	grep "error: you have staged changes in your working tree" err &&
 	git reset --hard HEAD &&
 	git rebase --continue &&
-	test $(git cat-file commit HEAD | sed -ne \$p) = I &&
+	test_commit_message HEAD <<-\EOF &&
+	F
+
+	I
+	EOF
 	git reset --hard original-branch2
+'
+
+test_expect_success 'rebase -i skipped "squash" that fails' '
+	(
+		set_fake_editor &&
+		test_must_fail env \
+			FAKE_LINES="exec_>file5 1 squash 3 squash 2" \
+			git rebase -i A H
+	) &&
+	rm file5 &&
+	# remove first squash from todo list
+	sed "1d" .git/rebase-merge/git-rebase-todo >todo.tmp &&
+	mv todo.tmp .git/rebase-merge/git-rebase-todo &&
+	git rebase --continue &&
+	test_commit_message HEAD <<-\EOF
+	F
+
+	G
+	EOF
+'
+
+test_expect_success 'rebase -i skipped final "squash" that fails' '
+	(
+		set_fake_editor &&
+		test_must_fail env \
+			FAKE_LINES="exec_>_file5 1 squash 2 squash 3" \
+			git rebase -i A H &&
+		test_cmp_rev HEAD^{tree} G^{tree} &&
+		rm file5 &&
+		# remove final squash from todo list
+		>.git/rebase-merge/git-rebase-todo &&
+		FAKE_COMMIT_MESSAGE=edited git rebase --continue
+	) &&
+	test_commit_message HEAD -m edited
 '
 
 test_expect_success 'rebase -i commits that overwrite untracked files (no ff)' '

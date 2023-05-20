@@ -4958,6 +4958,8 @@ static int pick_one_commit(struct repository *r,
 	if (is_rebase_i(opts) && res < 0) {
 		/* Reschedule */
 		*reschedule = 1;
+		if (is_fixup(item->command))
+			intend_to_amend();
 		return -1;
 	}
 	if (item->command == TODO_EDIT) {
@@ -5337,8 +5339,7 @@ static int commit_staged_changes(struct repository *r,
 		 */
 		if (!is_clean || !ctx->current_fixup_count)
 			; /* this is not the final fixup */
-		else if (!oideq(&head, &to_amend) ||
-			 !file_exists(rebase_path_stopped_sha())) {
+		else if (!oideq(&head, &to_amend)) {
 			/* was a final fixup or squash done manually? */
 			if (!is_fixup(peek_command(todo_list, 0)))
 				clear_fixups(ctx);
