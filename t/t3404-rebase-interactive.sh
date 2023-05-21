@@ -507,6 +507,26 @@ test_expect_success 'squash works as expected' '
 	test $one = $(git rev-parse HEAD~2)
 '
 
+test_expect_success 'skipped squash restores fixup message verbatim' '
+	printf "subject\n\n\n# verbatim" >msg &&
+	oid=$(git commit-tree -p D^0 E^{tree} <msg) &&
+	cat >todo <<-EOF &&
+	pick C
+	fixup -C $oid
+	squash D # conflicts
+	fixup B
+	EOF
+
+	(
+		set_replace_editor todo &&
+		test_must_fail git rebase -i A E
+	) &&
+	# editor should not be invoked
+	GIT_EDITOR=false git rebase --skip &&
+	# rebase --skip should have restored commit message
+	test_commit_message HEAD msg
+'
+
 test_expect_success 'interrupted squash works as expected' '
 	git checkout -b interrupted-squash conflict-branch &&
 	one=$(git rev-parse HEAD~3) &&

@@ -216,6 +216,9 @@ struct replay_ctx {
 	 * The message used for fixups ...
 	 */
 	struct strbuf fixup_msg;
+	struct strbuf prev_message;
+	struct strbuf prev_fixup_msg;
+
 	/*
 	 * Stores the reflog message that will be used when creating a
 	 * commit. Points to a static buffer and should not be
@@ -235,6 +238,8 @@ struct replay_ctx {
 	 * Do we have a fixup message.
 	 */
 	unsigned have_fixup_msg :1;
+	unsigned have_prev_message :1;
+	unsigned have_prev_fixup_msg :1;
 	/*
 	 * Has there been a squash command before the current command
 	 * in the current chain of fixup and squash commands.
@@ -252,6 +257,8 @@ struct replay_ctx* replay_ctx_new(void)
 
 	strbuf_init(&ctx->message, 0);
 	strbuf_init(&ctx->fixup_msg, 0);
+	strbuf_init(&ctx->prev_message, 0);
+	strbuf_init(&ctx->prev_fixup_msg, 0);
 
 	return ctx;
 }
@@ -424,6 +431,8 @@ static void replay_ctx_release(struct replay_ctx *ctx)
 {
 	strbuf_release(&ctx->message);
 	strbuf_release(&ctx->fixup_msg);
+	strbuf_release(&ctx->prev_message);
+	strbuf_release(&ctx->prev_fixup_msg);
 }
 
 void replay_opts_release(struct replay_opts *opts)
@@ -1899,6 +1908,16 @@ static const char skip_first_commit_msg_str[] = N_("The 1st commit message will 
 static const char skip_nth_commit_msg_fmt[] = N_("The commit message #%d will be skipped:");
 static const char combined_commit_msg_fmt[] = N_("This is a combination of %d commits.");
 
+static void clear_fixups(struct replay_ctx *ctx)
+{
+	ctx->current_fixup_count = 0;
+	ctx->have_fixup_msg = 0;
+	ctx->have_prev_fixup_msg = 0;
+	ctx->have_prev_message = 0;
+	ctx->pending_squash = 0;
+	ctx->seen_squash = 0;
+}
+
 static int is_fixup_flag(enum todo_command command, unsigned flag)
 {
 	return command == TODO_FIXUP && ((flag & TODO_REPLACE_FIXUP_MSG) ||
@@ -2065,6 +2084,15 @@ static int update_squash_messages(struct repository *r,
 		struct strbuf header = STRBUF_INIT;
 		char *eol;
 
+		assert(ctx->have_message);
+		strbuf_reset(&ctx->prev_message);
+		strbuf_addbuf(&ctx->prev_message, &ctx->message);
+		ctx->have_prev_message = 1;
+		if (ctx->have_fixup_msg) {
+			strbuf_reset(&ctx->prev_fixup_msg);
+			strbuf_addbuf(&ctx->prev_fixup_msg, &ctx->fixup_msg);
+			ctx->have_prev_fixup_msg = 1;
+		}
 		eol = ctx->message.buf[0] != comment_line_char ?
 			ctx->message.buf : strchrnul(ctx->message.buf, '\n');
 
@@ -2090,10 +2118,13 @@ static int update_squash_messages(struct repository *r,
 			return error(_("could not read HEAD's commit message"));
 
 		find_commit_subject(head_message, &body);
+		strbuf_reset(&ctx->prev_message);
+		strbuf_addstr(&ctx->prev_message, body);
+		ctx->have_prev_message = 1;
+		ctx->have_fixup_msg = command == TODO_FIXUP;
 		if (command == TODO_FIXUP && !flag) {
 			strbuf_reset(&ctx->fixup_msg);
 			strbuf_addstr(&ctx->fixup_msg, body);
-			ctx->have_fixup_msg = 1;
 		}
 		strbuf_addf(&ctx->message, "%c ", comment_line_char);
 		strbuf_addf(&ctx->message, _(combined_commit_msg_fmt), 2);
@@ -2487,13 +2518,8 @@ fast_forward_edit:
 		}
 	}
 
-
-	if (!res && final_fixup) {
-		ctx->have_fixup_msg = 0;
-		ctx->seen_squash = 0;
-		ctx->pending_squash = 0;
-		ctx->current_fixup_count = 0;
-	}
+	if (!res && final_fixup)
+		clear_fixups(ctx);
 
 leave:
 	free_message(commit, &msg);
@@ -3048,7 +3074,7 @@ static void read_strategy_opts(struct replay_opts *opts, struct strbuf *buf)
 	parse_strategy_opts(opts, buf->buf);
 }
 
-static int parse_state_flag(const char *s)
+static int parse_ctx_flag(const char *s)
 {
 	if (!strcmp(s, "1"))
 		return 1;
@@ -3058,41 +3084,113 @@ static int parse_state_flag(const char *s)
 		BUG("could not parse flag '%s'", s);
 }
 
-static void read_state(struct replay_ctx *ctx, struct strbuf *buf)
+static int parse_ctx(struct replay_ctx *ctx, char *s)
 {
-	if (read_oneliner(buf, rebase_path_state(),
-			  READ_ONELINER_SKIP_IF_EMPTY)) {
-		const char **argv;
-		int argc = split_cmdline(buf->buf, &argv);
+	const char **argv;
+	int i = 0;
+	int count = split_cmdline(s, &argv);
 
-		if (argc != 3)
-			BUG("...");
+	if (count < 0)
+		BUG("could not split '%s': %s", s,
+		    split_cmdline_strerror(count));
 
-		if (strtol_i(argv[0], 10, &ctx->current_fixup_count) ||
-		    ctx->current_fixup_count < 0)
-			BUG("could not parse fixup count '%s'", argv[0]);
-		ctx->seen_squash = parse_state_flag(argv[1]);
-		ctx->pending_squash = parse_state_flag(argv[2]);
+	if (count != 7)
+		return error(
+			_("could not parse state, expecting 7 items, got %d"),
+			count);
 
-		free(argv);
-	} else if (read_oneliner(buf, rebase_path_current_fixups(),
-				 READ_ONELINER_SKIP_IF_EMPTY)) {
-		const char *last_p =buf->buf, *p;
-		int is_squash = 0;
+	if (strtol_i(argv[i], 10, &ctx->current_fixup_count) ||
+	    ctx->current_fixup_count < 0)
+		return error(_("could not parse fixup count '%s'"), argv[i]);
+	i++;
+	ctx->seen_squash = parse_ctx_flag(argv[i++]);
+	ctx->pending_squash = parse_ctx_flag(argv[i++]);
+	ctx->have_prev_message = parse_ctx_flag(argv[i++]);
+	ctx->have_prev_fixup_msg = parse_ctx_flag(argv[i++]);
+	strbuf_addstr(&ctx->prev_message, argv[i++]);
+	strbuf_addstr(&ctx->prev_fixup_msg, argv[i++]);
 
-		ctx->current_fixup_count = 1;
-		while ((p = strchr(last_p, '\n'))) {
-			ctx->seen_squash |= is_squash;
-			is_squash = starts_with(last_p, "squash");
-			ctx->current_fixup_count++;
-			last_p = p + 1;
-		}
-		ctx->pending_squash = is_squash;
-		unlink(rebase_path_current_fixups());
-	}
+	free(argv);
+	return 0;
 }
 
-static int read_populate_opts(struct replay_opts *opts)
+static int parse_current_fixups(struct repository *r, struct replay_ctx *ctx,
+				const char *s)
+{
+	struct commit *commit;
+	const char *encoding = get_commit_output_encoding();
+	const char *msg, *last_p = s, *p;
+	int seen_squash = 0, is_squash = 0, res = 0;
+
+	ctx->current_fixup_count = 1;
+	while ((p = strchr(last_p, '\n'))) {
+		seen_squash |= is_squash;
+		is_squash = starts_with(last_p, "squash");
+		ctx->current_fixup_count++;
+		last_p = p + 1;
+	}
+	unlink(rebase_path_current_fixups());
+
+	if (parse_head(r, &commit))
+		return error(_("could not parse HEAD"));
+
+	p = repo_logmsg_reencode(r, commit, NULL, encoding);
+	if (!p)  {
+		res = error(_("could not parse commit %s"),
+			    oid_to_hex(&commit->object.oid));
+		goto unuse_commit_buffer;
+	}
+	find_commit_subject(p, &msg);
+	strbuf_reset(&ctx->prev_message);
+	strbuf_addstr(&ctx->prev_message, msg);
+	ctx->have_prev_message = 1;
+	ctx->seen_squash = seen_squash;
+	ctx->pending_squash = is_squash;
+	/*
+	 * If we haven't seen a squash command then restore
+	 * the fixup message.
+	 */
+	if (!seen_squash) {
+		strbuf_reset(&ctx->prev_fixup_msg);
+		strbuf_addstr(&ctx->prev_fixup_msg, msg);
+		strbuf_stripspace(&ctx->prev_fixup_msg, comment_line_char);
+		ctx->have_prev_fixup_msg = 1;
+	}
+ unuse_commit_buffer:
+	repo_unuse_commit_buffer(r, commit, p);
+
+return res;
+}
+
+
+static int read_ctx(struct repository *r, struct replay_ctx *ctx,
+		     struct strbuf *buf)
+{
+	int ret = 0;
+
+	if (read_oneliner(buf, rebase_path_state(),
+			  READ_ONELINER_SKIP_IF_EMPTY)) {
+		ret = parse_ctx(ctx, buf->buf);
+	} else if (read_oneliner(buf, rebase_path_current_fixups(),
+				 READ_ONELINER_SKIP_IF_EMPTY)) {
+		ret = parse_current_fixups(r, ctx, buf->buf);
+	}
+
+	if (!ctx->current_fixup_count) {
+		assert(!ctx->have_fixup_msg);
+		assert(!ctx->have_prev_message);
+		assert(!ctx->have_prev_fixup_msg);
+		assert(!ctx->seen_squash);
+		assert(!ctx->pending_squash);
+	}
+	assert(ctx->have_prev_message || !ctx->prev_message.len);
+	assert(ctx->have_fixup_msg || !ctx->fixup_msg.len);
+	assert(ctx->have_prev_fixup_msg || !ctx->prev_fixup_msg.len);
+
+	return ret;
+}
+
+static int read_populate_opts(struct repository *r, struct replay_opts *opts)
 {
 	struct replay_ctx *ctx = opts->ctx;
 
@@ -3155,7 +3253,9 @@ static int read_populate_opts(struct replay_opts *opts)
 		read_strategy_opts(opts, &buf);
 		strbuf_reset(&buf);
 
-		read_state(ctx, &buf);
+		ret = read_ctx(r, ctx, &buf);
+		if (ret)
+			goto done_rebase_i;
 		strbuf_reset(&buf);
 
 		if (ctx->current_fixup_count) {
@@ -4581,6 +4681,14 @@ static int write_ctx(struct replay_ctx *ctx)
 	int ret = 0;
 	struct strbuf buf = STRBUF_INIT;
 
+	if (!ctx->current_fixup_count) {
+		assert(!ctx->have_fixup_msg);
+		assert(!ctx->have_prev_message);
+		assert(!ctx->have_prev_fixup_msg);
+		assert(!ctx->pending_squash);
+		assert(!ctx->seen_squash);
+	}
+
 	if (ctx->current_fixup_count) {
 		if (ctx->have_fixup_msg) {
 			if (write_message(ctx->fixup_msg.buf,
@@ -4606,8 +4714,14 @@ static int write_ctx(struct replay_ctx *ctx)
 					  rebase_path_squash_msg());
 	}
 
-	strbuf_addf(&buf, "%d %u %u", ctx->current_fixup_count,
-		    ctx->seen_squash, ctx->seen_squash);
+	strbuf_addf(&buf, "%d %u %u %u %u", ctx->current_fixup_count,
+		    ctx->pending_squash, ctx->seen_squash,
+		    ctx->have_prev_message, ctx->have_prev_fixup_msg);
+	quote_cmdline_arg(&buf, ctx->have_prev_message ?
+				ctx->prev_message.buf : "");
+	quote_cmdline_arg(&buf, ctx->have_prev_fixup_msg ?
+				ctx->prev_fixup_msg.buf : "");
+
 	if (write_message(buf.buf, buf.len,
 			  rebase_path_state(), 1))
 		ret = error(_("could not write '%s'"),
@@ -4915,7 +5029,6 @@ static int do_pick_commits(struct repository *r,
 		const char *arg = todo_item_get_arg(todo_list, item);
 		int check_todo = 0;
 
-		ctx->have_message = 0;
 		if (save_todo(todo_list, opts, reschedule))
 			return -1;
 		if (is_rebase_i(opts)) {
@@ -4939,6 +5052,18 @@ static int do_pick_commits(struct repository *r,
 			unlink(git_path_auto_merge(r));
 			delete_ref(NULL, "REBASE_HEAD", NULL, REF_NO_DEREF);
 
+			if (item->command > TODO_SQUASH &&
+			    item->command != TODO_MERGE &&
+			    item->command != TODO_COMMENT) {
+				ctx->have_message = 0;
+			}
+			if (!is_fixup(item->command) &&
+			    item->command != TODO_COMMENT) {
+				assert(!ctx->current_fixup_count);
+				assert(!ctx->have_fixup_msg);
+				assert(!ctx->have_prev_fixup_msg);
+				assert(!ctx->have_prev_message);
+			}
 			ctx->seen_squash |= ctx->pending_squash;
 			ctx->pending_squash = 0;
 
@@ -5175,6 +5300,7 @@ static int commit_staged_changes(struct repository *r,
 	struct replay_ctx *ctx = opts->ctx;
 	unsigned int flags = ALLOW_EMPTY | EDIT_MSG;
 	unsigned int final_fixup = 0, is_clean;
+	const char *msg_file = rebase_path_message();
 
 	if (has_unstaged_changes(r, 1))
 		return error(_("cannot rebase: You have unstaged changes."));
@@ -5214,11 +5340,9 @@ static int commit_staged_changes(struct repository *r,
 		else if (!oideq(&head, &to_amend) ||
 			 !file_exists(rebase_path_stopped_sha())) {
 			/* was a final fixup or squash done manually? */
-			if (!is_fixup(peek_command(todo_list, 0))) {
-				ctx->seen_squash = 0;
-				ctx->pending_squash = 0;
-				ctx->current_fixup_count = 0;
-			}
+			if (!is_fixup(peek_command(todo_list, 0)))
+				clear_fixups(ctx);
+			ctx->have_message = 0;
 		} else {
 			/* we are in a fixup/squash chain */
 			ctx->current_fixup_count--;
@@ -5240,37 +5364,45 @@ static int commit_staged_changes(struct repository *r,
 				/*
 				 * If there was not a single "squash" in the
 				 * chain, we only need to clean up the commit
-				 * message, no need to bother the user with
+				 * message, no need to * bother the user with
 				 * opening the commit message in the editor.
 				 */
-				if (!ctx->seen_squash)
-					flags = (flags & ~EDIT_MSG) | CLEANUP_MSG;
+				if (ctx->have_prev_fixup_msg) {
+					assert(ctx->have_prev_message);
+					if (write_message(ctx->prev_fixup_msg.buf,
+							  ctx->prev_fixup_msg.len,
+							  msg_file, 0))
+						return -1;
+					flags = (flags & ~EDIT_MSG) | VERBATIM_MSG;
+				} else {
+					msg_file = NULL;
+				}
+				ctx->have_prev_message = 0;
+				ctx->have_prev_fixup_msg = 0;
 			} else if (is_fixup(peek_command(todo_list, 0))) {
 				/*
 				 * We need to update the squash message to skip
 				 * the latest commit message.
 				 */
-				int res = 0;
-				struct commit *commit;
-				const char *msg, *p = NULL;
-				const char *encoding = get_commit_output_encoding();
-
-				if (parse_head(r, &commit))
-					return error(_("could not parse HEAD"));
-
-				p = repo_logmsg_reencode(r, commit, NULL, encoding);
-				if (!p)  {
-					res = error(_("could not parse commit %s"),
-						    oid_to_hex(&commit->object.oid));
-					goto unuse_commit_buffer;
-				}
-				find_commit_subject(p, &msg);
+				assert(ctx->have_prev_message);
 				strbuf_reset(&ctx->message);
-				strbuf_addstr(&ctx->message, msg);
-			unuse_commit_buffer:
-				repo_unuse_commit_buffer(r, commit, p);
-				if (res)
-					return res;
+				strbuf_addbuf(&ctx->message,
+					      &ctx->prev_message);
+				ctx->have_prev_message = 0;
+				/*
+				 * If we haven't seen a squash
+				 * command then restore the
+				 * fixup message.
+				 */
+				if (ctx->have_prev_fixup_msg) {
+					strbuf_reset(&ctx->fixup_msg);
+					strbuf_addbuf(&ctx->fixup_msg,
+						      &ctx->prev_fixup_msg);
+					ctx->have_fixup_msg = 1;
+					ctx->have_prev_fixup_msg = 0;
+				} else {
+					ctx->have_fixup_msg = 0;
+				}
 			}
 		}
 
@@ -5291,24 +5423,18 @@ static int commit_staged_changes(struct repository *r,
 			return 0;
 	}
 
-	if (run_git_commit(final_fixup ? NULL : rebase_path_message(),
-			   opts, flags))
+	if (run_git_commit(msg_file, opts, flags))
 		return error(_("could not commit staged changes."));
 	unlink(rebase_path_amend());
 	unlink(git_path_merge_head(r));
 	unlink(git_path_auto_merge(r));
-	if (final_fixup)
-		ctx->have_fixup_msg = 0;
+	/*
+	 * Whether final fixup or not, we just cleaned up the commit
+	 * message...
+	 */
+	clear_fixups(ctx);
+	ctx->have_message = 0;
 
-	if (ctx->current_fixup_count > 0) {
-		/*
-		 * Whether final fixup or not, we just cleaned up the commit
-		 * message...
-		 */
-		ctx->seen_squash = 0;
-		ctx->pending_squash = 0;
-		ctx->current_fixup_count = 0;
-	}
 	return 0;
 }
 
@@ -5321,7 +5447,7 @@ int sequencer_continue(struct repository *r, struct replay_opts *opts)
 	if (read_and_refresh_cache(r, opts))
 		return -1;
 
-	if (read_populate_opts(opts))
+	if (read_populate_opts(r, opts))
 		return -1;
 	if (is_rebase_i(opts)) {
 		if ((res = read_populate_todo(r, &todo_list, opts)))

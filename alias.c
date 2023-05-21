@@ -47,21 +47,25 @@ void list_aliases(struct string_list *list)
 	read_early_config(config_alias_cb, &data);
 }
 
+void quote_cmdline_arg(struct strbuf *buf, const char *arg)
+{
+	if (buf->len && !isspace(buf->buf[buf->len - 1]))
+		strbuf_addch(buf, ' ');
+	strbuf_addch(buf, '"');
+	for (const char *p = arg; *p; p++) {
+		const char c = *p;
+
+		if (c == '"' || c =='\\')
+			strbuf_addch(buf, '\\');
+		strbuf_addch(buf, c);
+	}
+	strbuf_addch(buf, '"');
+}
+
 void quote_cmdline(struct strbuf *buf, const char **argv)
 {
-	for (const char **argp = argv; *argp; argp++) {
-		if (argp != argv)
-			strbuf_addch(buf, ' ');
-		strbuf_addch(buf, '"');
-		for (const char *p = *argp; *p; p++) {
-			const char c = *p;
-
-			if (c == '"' || c =='\\')
-				strbuf_addch(buf, '\\');
-			strbuf_addch(buf, c);
-		}
-		strbuf_addch(buf, '"');
-	}
+	for (const char **argp = argv; *argp; argp++)
+		quote_cmdline_arg(buf, *argp);
 }
 
 #define SPLIT_CMDLINE_BAD_ENDING 1
