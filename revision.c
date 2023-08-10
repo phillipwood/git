@@ -46,6 +46,7 @@
 #include "resolve-undo.h"
 #include "parse-options.h"
 #include "wildmatch.h"
+#include "pager.h"
 
 volatile show_early_output_fn_t show_early_output;
 
@@ -2546,7 +2547,7 @@ static int handle_revision_opt(struct rev_info *revs, int argc, const char **arg
 		revs->date_mode.type = DATE_RELATIVE;
 		revs->date_mode_explicit = 1;
 	} else if ((argcount = parse_long_opt("date", argv, &optarg))) {
-		parse_date_format(optarg, &revs->date_mode);
+		parse_date_format(optarg, &revs->date_mode, pager_in_use());
 		revs->date_mode_explicit = 1;
 		return argcount;
 	} else if (!strcmp(arg, "--log-size")) {

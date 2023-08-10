@@ -7,7 +7,6 @@
 #include "git-compat-util.h"
 #include "date.h"
 #include "gettext.h"
-#include "pager.h"
 #include "strbuf.h"
 
 /*
@@ -1003,13 +1002,13 @@ static enum date_mode_type parse_date_type(const char *format, const char **end)
 	die("unknown date format %s", format);
 }
 
-void parse_date_format(const char *format, struct date_mode *mode)
+void parse_date_format(const char *format, struct date_mode *mode, int pager_in_use)
 {
 	const char *p;
 
 	/* "auto:foo" is "if tty/pager, then foo, otherwise normal" */
 	if (skip_prefix(format, "auto:", &p)) {
-		if (isatty(1) || pager_in_use())
+		if (isatty(1) || pager_in_use)
 			format = p;
 		else
 			format = "default";

@@ -53,7 +53,7 @@ const char *show_date(timestamp_t time, int timezone, const struct date_mode *mo
  * be used with strbuf_addftime(), in which case you'll need to call
  * date_mode_release() later.
  */
-void parse_date_format(const char *format, struct date_mode *mode);
+void parse_date_format(const char *format, struct date_mode *mode, int pager_in_use);
 
 /**
  * Release a "struct date_mode", currently only required if

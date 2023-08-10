@@ -185,7 +185,7 @@ static void cmd_log_init_defaults(struct rev_info *rev)
 	rev->diffopt.flags.allow_textconv = 1;
 
 	if (default_date_mode)
-		parse_date_format(default_date_mode, &rev->date_mode);
+		parse_date_format(default_date_mode, &rev->date_mode, pager_in_use());
 }
 
 static void set_default_decoration_filter(struct decoration_filter *decoration_filter)

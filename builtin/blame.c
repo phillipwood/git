@@ -715,7 +715,7 @@ static int git_blame_config(const char *var, const char *value,
 	if (!strcmp(var, "blame.date")) {
 		if (!value)
 			return config_error_nonbool(var);
-		parse_date_format(value, &blame_date_mode);
+		parse_date_format(value, &blame_date_mode, pager_in_use());
 		return 0;
 	}
 	if (!strcmp(var, "blame.ignorerevsfile")) {

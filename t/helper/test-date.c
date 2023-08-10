@@ -1,5 +1,6 @@
 #include "test-tool.h"
 #include "date.h"
+#include "pager.h"
 #include "trace.h"
 
 static const char *usage_msg = "\n"
@@ -37,7 +38,7 @@ static void show_dates(const char **argv, const char *format)
 {
 	struct date_mode mode = DATE_MODE_INIT;
 
-	parse_date_format(format, &mode);
+	parse_date_format(format, &mode, pager_in_use());
 	for (; *argv; argv++) {
 		char *arg;
 		timestamp_t t;
