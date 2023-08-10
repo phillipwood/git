@@ -286,4 +286,10 @@ void clear_object_flags(unsigned flags);
  */
 void repo_clear_commit_marks(struct repository *r, unsigned int flags);
 
+/*
+ * Calls the correct function out of {unlink,rmdir}_or_warn based on
+ * the supplied file mode.
+ */
+int remove_or_warn(unsigned int mode, const char *path);
+
 #endif /* OBJECT_H */
