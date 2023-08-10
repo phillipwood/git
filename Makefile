@@ -669,6 +669,7 @@ FUZZ_PROGRAMS =
 GIT_OBJS =
 LIB_OBJS =
 SCALAR_OBJS =
+STUB_OBJS =
 OBJECTS =
 OTHER_PROGRAMS =
 PROGRAM_OBJS =
@@ -956,6 +957,7 @@ COCCI_SOURCES = $(filter-out $(THIRD_PARTY_SOURCES),$(FOUND_C_SOURCES))
 
 LIB_H = $(FOUND_H_SOURCES)
 
+ifndef GIT_STD_LIB
 LIB_OBJS += abspath.o
 LIB_OBJS += add-interactive.o
 LIB_OBJS += add-patch.o
@@ -1196,6 +1198,27 @@ LIB_OBJS += write-or-die.o
 LIB_OBJS += ws.o
 LIB_OBJS += wt-status.o
 LIB_OBJS += xdiff-interface.o
+else ifdef GIT_STD_LIB
+LIB_OBJS += abspath.o
+LIB_OBJS += ctype.o
+LIB_OBJS += date.o
+LIB_OBJS += hex-ll.o
+LIB_OBJS += parse.o
+LIB_OBJS += strbuf.o
+LIB_OBJS += usage.o
+LIB_OBJS += utf8.o
+LIB_OBJS += wrapper.o
+
+ifdef STUB_REPOSITORY
+STUB_OBJS += stubs/repository.o
+endif
+
+ifdef STUB_TRACE2
+STUB_OBJS += stubs/trace2.o
+endif
+
+LIB_OBJS += $(STUB_OBJS)
+endif
 
 BUILTIN_OBJS += builtin/add.o
 BUILTIN_OBJS += builtin/am.o
@@ -2160,6 +2183,11 @@ ifdef FSMONITOR_OS_SETTINGS
 	COMPAT_CFLAGS += -DHAVE_FSMONITOR_OS_SETTINGS
 	COMPAT_OBJS += compat/fsmonitor/fsm-settings-$(FSMONITOR_OS_SETTINGS).o
 	COMPAT_OBJS += compat/fsmonitor/fsm-path-utils-$(FSMONITOR_OS_SETTINGS).o
+endif
+
+ifdef GIT_STD_LIB
+	BASIC_CFLAGS += -DGIT_STD_LIB
+	BASIC_CFLAGS += -DNO_GETTEXT
 endif
 
 ifeq ($(TCLTK_PATH),)
@@ -3654,7 +3682,7 @@ clean: profile-clean coverage-clean cocciclean
 	$(RM) po/git.pot po/git-core.pot
 	$(RM) git.res
 	$(RM) $(OBJECTS)
-	$(RM) $(LIB_FILE) $(XDIFF_LIB) $(REFTABLE_LIB) $(REFTABLE_TEST_LIB)
+	$(RM) $(LIB_FILE) $(XDIFF_LIB) $(REFTABLE_LIB) $(REFTABLE_TEST_LIB) $(STD_LIB_FILE)
 	$(RM) $(ALL_PROGRAMS) $(SCRIPT_LIB) $(BUILT_INS) $(OTHER_PROGRAMS)
 	$(RM) $(TEST_PROGRAMS)
 	$(RM) $(FUZZ_PROGRAMS)
@@ -3834,3 +3862,35 @@ $(FUZZ_PROGRAMS): all
 		$(XDIFF_OBJS) $(EXTLIBS) git.o $@.o $(LIB_FUZZING_ENGINE) -o $@
 
 fuzz-all: $(FUZZ_PROGRAMS)
+
+### Libified Git rules
+
+# git-std-lib
+# `make git-std-lib GIT_STD_LIB=YesPlease STUB_REPOSITORY=YesPlease STUB_TRACE2=YesPlease`
+STD_LIB = git-std-lib.a
+
+$(STD_LIB): $(LIB_OBJS) $(COMPAT_OBJS) $(STUB_OBJS)
+	$(QUIET_AR)$(RM) $@ && $(AR) $(ARFLAGS) $@ $^
+
+TEMP_HEADERS = temp_headers/
+
+git-std-lib:
+# Move headers to temporary folder and replace them with stubbed headers.
+# After building, move headers and stubbed headers back.
+ifneq ($(STUB_OBJS),)
+	mkdir -p $(TEMP_HEADERS); \
+	for d in $(STUB_OBJS); do \
+		BASE=$${d%.*}; \
+		mv $${BASE##*/}.h $(TEMP_HEADERS)$${BASE##*/}.h; \
+		mv $${BASE}.h $${BASE##*/}.h; \
+	done; \
+	$(MAKE) $(STD_LIB); \
+	for d in $(STUB_OBJS); do \
+		BASE=$${d%.*}; \
+		mv $${BASE##*/}.h $${BASE}.h; \
+		mv $(TEMP_HEADERS)$${BASE##*/}.h $${BASE##*/}.h; \
+	done; \
+	rm -rf temp_headers
+else
+	$(MAKE) $(STD_LIB)
+endif

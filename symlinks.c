@@ -337,6 +337,7 @@ void invalidate_lstat_cache(void)
 	reset_lstat_cache(&default_cache);
 }
 
+#if !defined(__MINGW32__) && !defined(_MSC_VER) && !defined(GIT_STD_LIB)
 #undef rmdir
 int lstat_cache_aware_rmdir(const char *path)
 {
@@ -348,3 +349,4 @@ int lstat_cache_aware_rmdir(const char *path)
 
 	return ret;
 }
+#endif
