@@ -1209,10 +1209,6 @@ LIB_OBJS += usage.o
 LIB_OBJS += utf8.o
 LIB_OBJS += wrapper.o
 
-ifdef STUB_REPOSITORY
-STUB_OBJS += stubs/repository.o
-endif
-
 ifdef STUB_TRACE2
 STUB_OBJS += stubs/trace2.o
 endif
@@ -3866,31 +3862,8 @@ fuzz-all: $(FUZZ_PROGRAMS)
 ### Libified Git rules
 
 # git-std-lib
-# `make git-std-lib GIT_STD_LIB=YesPlease STUB_REPOSITORY=YesPlease STUB_TRACE2=YesPlease`
+# `make git-std-lib.a GIT_STD_LIB=YesPlease STUB_TRACE2=YesPlease`
 STD_LIB = git-std-lib.a
 
 $(STD_LIB): $(LIB_OBJS) $(COMPAT_OBJS) $(STUB_OBJS)
 	$(QUIET_AR)$(RM) $@ && $(AR) $(ARFLAGS) $@ $^
-
-TEMP_HEADERS = temp_headers/
-
-git-std-lib:
-# Move headers to temporary folder and replace them with stubbed headers.
-# After building, move headers and stubbed headers back.
-ifneq ($(STUB_OBJS),)
-	mkdir -p $(TEMP_HEADERS); \
-	for d in $(STUB_OBJS); do \
-		BASE=$${d%.*}; \
-		mv $${BASE##*/}.h $(TEMP_HEADERS)$${BASE##*/}.h; \
-		mv $${BASE}.h $${BASE##*/}.h; \
-	done; \
-	$(MAKE) $(STD_LIB); \
-	for d in $(STUB_OBJS); do \
-		BASE=$${d%.*}; \
-		mv $${BASE##*/}.h $${BASE}.h; \
-		mv $(TEMP_HEADERS)$${BASE##*/}.h $${BASE##*/}.h; \
-	done; \
-	rm -rf temp_headers
-else
-	$(MAKE) $(STD_LIB)
-endif
