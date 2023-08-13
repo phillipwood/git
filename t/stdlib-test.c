@@ -67,10 +67,10 @@ void strbuf_funcs(void) {
 	struct strbuf sb3 = STRBUF_INIT;
 	struct string_list list = STRING_LIST_INIT_NODUP;
 	char *buf = "foo";
-	struct strbuf_expand_dict_entry dict[] = {
-		{ "foo", NULL, },
-		{ "bar", NULL, },
-	};
+	/* struct strbuf_expand_dict_entry dict[] = { */
+	/* 	{ "foo", NULL, }, */
+	/* 	{ "bar", NULL, }, */
+	/* }; */
 	int fd = open("/dev/null", O_RDONLY);
 
 	fprintf(stderr, "calling strbuf functions\n");
@@ -105,12 +105,12 @@ void strbuf_funcs(void) {
 	strbuf_addbuf(sb, sb2);
 	strbuf_join_argv(sb, 0, NULL, ' ');
 	strbuf_addchars(sb, 1, 1);
-	strbuf_addf(sb, "%s", "foo");
+	strbuf_addf(sb, "%i", 1);
 	strbuf_add_commented_lines(sb, "foo", 3, '#');
 	strbuf_commented_addf(sb, '#', "%s", "foo");
 	// strbuf_vaddf() called by strbuf_addf()
-	strbuf_expand(sb, "%s", strbuf_expand_literal_cb, NULL);
-	strbuf_expand(sb, "%s", strbuf_expand_dict_cb, &dict);
+//	strbuf_expand(sb, "%s", strbuf_expand_literal_cb, NULL);
+//	strbuf_expand(sb, "%s", strbuf_expand_dict_cb, &dict);
 	// strbuf_expand_literal_cb() called by strbuf_expand()
 	// strbuf_expand_dict_cb() called by strbuf_expand()
 	strbuf_addbuf_percentquote(sb, &sb3);
