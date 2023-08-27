@@ -15,6 +15,7 @@
 #include "hex.h"
 #include "hook.h"
 #include "merge-ll.h"
+#include "merge.h"
 #include "lockfile.h"
 #include "mem-pool.h"
 #include "merge-ort-wrappers.h"
@@ -263,6 +264,7 @@ static int checkout_merged(int pos, const struct checkout *state,
 	struct cache_entry *ce = the_repository->index->cache[pos];
 	const char *path = ce->name;
 	mmfile_t ancestor, ours, theirs;
+	char *base_label, *ours_label, *theirs_label;
 	enum ll_merge_result merge_status;
 	int status;
 	struct object_id oid;
@@ -293,10 +295,19 @@ static int checkout_merged(int pos, const struct checkout *state,
 
 	git_config_get_bool("merge.renormalize", &renormalize);
 	ll_opts.renormalize = renormalize;
+	if (read_merge_labels(the_repository, &base_label, &ours_label,
+				 &theirs_label)) {
+		base_label = xstrdup("base");
+		ours_label = xstrdup("ours");
+		theirs_label = xstrdup("theirs");
+	}
 	ll_opts.conflict_style = conflict_style;
-	merge_status = ll_merge(&result_buf, path, &ancestor, "base",
-				&ours, "ours", &theirs, "theirs",
+	merge_status = ll_merge(&result_buf, path, &ancestor, base_label,
+				&ours, ours_label, &theirs, theirs_label,
 				state->istate, &ll_opts);
+	free(base_label);
+	free(ours_label);
+	free(theirs_label);
 	free(ancestor.ptr);
 	free(ours.ptr);
 	free(theirs.ptr);
@@ -692,6 +703,7 @@ static void describe_detached_head(const char *msg, struct commit *commit)
 }
 
 #define ERROR_FLAG_WRITEOUT (1u << 0)
+#define ERROR_FLAG_CONFLICTS (1u << 1)
 
 static int reset_tree(struct tree *tree, const struct checkout_opts *o,
 		      int worktree, unsigned int *error_flags,
@@ -916,6 +928,8 @@ static int merge_working_tree(const struct checkout_opts *opts,
 						     old_tree);
 			if (ret < 0)
 				exit(128);
+			if (!ret)
+				*error_flags |= ERROR_FLAG_CONFLICTS;
 			ret = reset_tree(new_tree,
 					 opts, 0,
 					 error_flags, new_branch_info);
@@ -951,10 +965,13 @@ static void report_tracking(struct branch_info *new_branch_info)
 
 static void update_refs_for_switch(const struct checkout_opts *opts,
 				   struct branch_info *old_branch_info,
-				   struct branch_info *new_branch_info)
+				   struct branch_info *new_branch_info,
+				   int merge_conflicts)
 {
 	struct strbuf msg = STRBUF_INIT;
 	const char *old_desc, *reflog_msg;
+	unsigned flags = 0;
+
 	if (opts->new_branch) {
 		if (opts->new_orphan_branch) {
 			enum log_refs_config log_all_ref_updates =
@@ -1046,7 +1063,11 @@ static void update_refs_for_switch(const struct checkout_opts *opts,
 						   old_branch_info->path);
 		}
 	}
-	remove_branch_state(the_repository, !opts->quiet);
+	if (!opts->quiet)
+		flags |= REMOVE_BRANCH_STATE_VERBOSE;
+	if (merge_conflicts)
+		flags |= REMOVE_BRANCH_STATE_PRESERVE_CONFLICT_LABELS;
+	remove_branch_state(the_repository, flags);
 	strbuf_release(&msg);
 	if (!opts->quiet &&
 	    !opts->force_detach &&
@@ -1218,12 +1239,13 @@ static int switch_branches(const struct checkout_opts *opts,
 	if (!opts->quiet && !old_branch_info.path && old_branch_info.commit && new_branch_info->commit != old_branch_info.commit)
 		orphaned_commit_warning(old_branch_info.commit, new_branch_info->commit);
 
-	update_refs_for_switch(opts, &old_branch_info, new_branch_info);
+	update_refs_for_switch(opts, &old_branch_info, new_branch_info,
+			       !!(error_flags & ERROR_FLAG_CONFLICTS));
 
 	ret = post_checkout_hook(old_branch_info.commit, new_branch_info->commit, 1);
 	branch_info_release(&old_branch_info);
 
-	return ret || error_flags;
+	return ret || !!(error_flags & ~ERROR_FLAG_CONFLICTS);
 }
 
 static int git_checkout_config(const char *var, const char *value,

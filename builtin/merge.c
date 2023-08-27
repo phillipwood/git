@@ -416,7 +416,7 @@ static void finish_up_to_date(void)
 		else
 			puts(_("Already up to date."));
 	}
-	remove_merge_branch_state(the_repository);
+	remove_merge_branch_state(the_repository, 0);
 }
 
 static void squash_message(struct commit *commit, struct commit_list *remoteheads)
@@ -946,8 +946,7 @@ static int merge_trivial(struct commit *head, struct commit_list *remoteheads)
 			&result_commit, NULL, sign_commit))
 		die(_("failed to write commit object"));
 	finish(head, remoteheads, &result_commit, "In-index merge");
-
-	remove_merge_branch_state(the_repository);
+	remove_merge_branch_state(the_repository, 0);
 	free_commit_list(parents);
 	return 0;
 }
@@ -976,7 +975,7 @@ static int finish_automerge(struct commit *head,
 	finish(head, remoteheads, &result_commit, buf.buf);
 
 	strbuf_release(&buf);
-	remove_merge_branch_state(the_repository);
+	remove_merge_branch_state(the_repository, 0);
 	free_commit_list(parents);
 	return 0;
 }
@@ -1386,7 +1385,7 @@ int cmd_merge(int argc,
 				      builtin_merge_usage,
 				      builtin_merge_options);
 
-		remove_merge_branch_state(the_repository);
+		remove_merge_branch_state(the_repository, 0);
 		goto done;
 	}
 
@@ -1621,7 +1620,7 @@ int cmd_merge(int argc,
 		}
 
 		finish(head_commit, remoteheads, &commit->object.oid, msg);
-		remove_merge_branch_state(the_repository);
+		remove_merge_branch_state(the_repository, 0);
 		goto done;
 	} else if (!remoteheads->next && common->next)
 		;
