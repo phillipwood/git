@@ -219,6 +219,8 @@ struct replay_ctx {
 	struct strbuf prev_message;
 	struct strbuf prev_fixup_msg;
 
+	struct strbuf author;
+
 	/*
 	 * Stores the reflog message that will be used when creating a
 	 * commit. Points to a static buffer and should not be
@@ -249,6 +251,7 @@ struct replay_ctx {
 	unsigned have_fixup_msg :1;
 	unsigned have_prev_message :1;
 	unsigned have_prev_fixup_msg :1;
+	unsigned have_author :1;
 	/*
 	 * Has there been a squash command before the current command
 	 * in the current chain of fixup and squash commands.
@@ -269,6 +272,7 @@ struct replay_ctx* replay_ctx_new(void)
 	strbuf_init(&ctx->fixup_msg, 0);
 	strbuf_init(&ctx->prev_message, 0);
 	strbuf_init(&ctx->prev_fixup_msg, 0);
+	strbuf_init(&ctx->author, 0);
 
 	return ctx;
 }
@@ -443,6 +447,7 @@ static void replay_ctx_release(struct replay_ctx *ctx)
 	strbuf_release(&ctx->fixup_msg);
 	strbuf_release(&ctx->prev_message);
 	strbuf_release(&ctx->prev_fixup_msg);
+	strbuf_release(&ctx->author);
 	free(ctx->rewritten.items);
 }
 
@@ -879,47 +884,34 @@ static int is_index_unchanged(struct repository *r)
 	return oideq(cache_tree_oid, get_commit_tree_oid(head_commit));
 }
 
-static int write_author_script(const char *message)
+
+static int write_author_script(const char *author)
 {
 	struct strbuf buf = STRBUF_INIT;
-	const char *eol;
 	int res;
 
-	for (;;)
-		if (!*message || starts_with(message, "\n")) {
-missing_author:
-			/* Missing 'author' line? */
-			unlink(rebase_path_author_script());
-			return 0;
-		} else if (skip_prefix(message, "author ", &message))
-			break;
-		else if ((eol = strchr(message, '\n')))
-			message = eol + 1;
-		else
-			goto missing_author;
-
 	strbuf_addstr(&buf, "GIT_AUTHOR_NAME='");
-	while (*message && *message != '\n' && *message != '\r')
-		if (skip_prefix(message, " <", &message))
+	while (*author && *author != '\n' && *author != '\r')
+		if (skip_prefix(author, " <", &author))
 			break;
-		else if (*message != '\'')
-			strbuf_addch(&buf, *(message++));
+		else if (*author != '\'')
+			strbuf_addch(&buf, *(author++));
 		else
-			strbuf_addf(&buf, "'\\%c'", *(message++));
+			strbuf_addf(&buf, "'\\%c'", *(author++));
 	strbuf_addstr(&buf, "'\nGIT_AUTHOR_EMAIL='");
-	while (*message && *message != '\n' && *message != '\r')
-		if (skip_prefix(message, "> ", &message))
+	while (*author && *author != '\n' && *author != '\r')
+		if (skip_prefix(author, "> ", &author))
 			break;
-		else if (*message != '\'')
-			strbuf_addch(&buf, *(message++));
+		else if (*author != '\'')
+			strbuf_addch(&buf, *(author++));
 		else
-			strbuf_addf(&buf, "'\\%c'", *(message++));
+			strbuf_addf(&buf, "'\\%c'", *(author++));
 	strbuf_addstr(&buf, "'\nGIT_AUTHOR_DATE='@");
-	while (*message && *message != '\n' && *message != '\r')
-		if (*message != '\'')
-			strbuf_addch(&buf, *(message++));
+	while (*author && *author != '\n' && *author != '\r')
+		if (*author != '\'')
+			strbuf_addch(&buf, *(author++));
 		else
-			strbuf_addf(&buf, "'\\%c'", *(message++));
+			strbuf_addf(&buf, "'\\%c'", *(author++));
 	strbuf_addch(&buf, '\'');
 	res = write_message(buf.buf, buf.len, rebase_path_author_script(), 1);
 	strbuf_release(&buf);
@@ -1032,25 +1024,23 @@ finish:
 	return retval;
 }
 
-/*
- * Read a GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL AND GIT_AUTHOR_DATE from a
- * file with shell quoting into struct strvec. Returns -1 on
- * error, 0 otherwise.
- */
-static int read_env_script(struct strvec *env)
+static int read_author_ident(struct replay_ctx *ctx)
 {
-	char *name, *email, *date;
+	char *name = NULL, *email = NULL, *date = NULL;
+	const char *ident;
 
 	if (read_author_script(rebase_path_author_script(),
-			       &name, &email, &date, 0))
+			       &name, &email, &date, 1))
 		return -1;
 
-	strvec_pushf(env, "GIT_AUTHOR_NAME=%s", name);
-	strvec_pushf(env, "GIT_AUTHOR_EMAIL=%s", email);
-	strvec_pushf(env, "GIT_AUTHOR_DATE=%s", date);
-	free(name);
-	free(email);
-	free(date);
+	if (!name) {
+		ctx->have_author = 0;
+		return 0;
+	}
+	ident = fmt_ident(name, email, WANT_AUTHOR_IDENT, date, 0);
+	strbuf_reset(&ctx->author);
+	strbuf_addstr(&ctx->author, ident);
+	ctx->have_author = 1;
 
 	return 0;
 }
@@ -1067,20 +1057,56 @@ static char *get_author(const char *message)
 	return NULL;
 }
 
-static const char *author_date_from_env(const struct strvec *env)
+static int ctx_set_author(struct replay_ctx *ctx, const char *message)
 {
-	int i;
-	const char *date;
+	size_t len;
+	const char *author = find_commit_header(message, "author", &len);
+	if (author) {
+		ctx->have_author = 1;
+		strbuf_reset(&ctx->author);
+		strbuf_add(&ctx->author, author, len);
+		return 0;
+	}
+	ctx->have_author = 0;
+	return -1;
+}
 
-	for (i = 0; i < env->nr; i++)
-		if (skip_prefix(env->v[i],
-				"GIT_AUTHOR_DATE=", &date))
-			return date;
-	/*
-	 * If GIT_AUTHOR_DATE is missing we should have already errored out when
-	 * reading the script
-	 */
-	BUG("GIT_AUTHOR_DATE missing from author script");
+static int push_ident_env(struct replay_opts *opts,
+			    struct strvec *env)
+{
+	struct replay_ctx *ctx = opts->ctx;
+	struct ident_split ident;
+
+	if (split_ident_line(&ident, ctx->author.buf, ctx->author.len))
+		return -1;
+
+	strvec_pushf(env, "GIT_AUTHOR_NAME=%.*s",
+		     (int)(ident.name_end - ident.name_begin),
+		     ident.name_begin);
+	strvec_pushf(env, "GIT_AUTHOR_EMAIL=%.*s",
+		     (int)(ident.mail_end - ident.mail_begin),
+		     ident.mail_begin);
+
+	if (opts->ignore_date)
+		strvec_push(env, "GIT_AUTHOR_DATE=");
+	else
+		strvec_pushf(env, "GIT_AUTHOR_DATE=@%.*s %.*s",
+			     (int)(ident.date_end - ident.date_begin),
+			     ident.date_begin,
+			     (int)(ident.tz_end - ident.tz_begin),
+			     ident.tz_begin);
+
+	if (opts->committer_date_is_author_date) {
+		if (opts->ignore_date)
+			strvec_push(env, "GIT_COMMITTER_DATE=");
+		else
+			strvec_pushf(env, "GIT_COMMITTER_DATE=@%.*s %.*s",
+				     (int)(ident.date_end - ident.date_begin),
+				     ident.date_begin,
+				     (int)(ident.tz_end - ident.tz_begin),
+				     ident.tz_begin);
+	}
+	return 0;
 }
 
 static const char staged_changes_advice[] =
@@ -1147,25 +1173,24 @@ static int run_git_commit(const char *defmsg,
 
 	cmd.git_cmd = 1;
 
-	if (is_rebase_i(opts) &&
-	    ((opts->committer_date_is_author_date && !opts->ignore_date) ||
-	     !(!defmsg && (flags & AMEND_MSG))) &&
-	    read_env_script(&cmd.env)) {
-		const char *gpg_opt = gpg_sign_opt_quoted(opts);
-
-		return error(_(staged_changes_advice),
-			     gpg_opt, gpg_opt);
+	if (is_rebase_i(opts)) {
+		if (((opts->committer_date_is_author_date && !opts->ignore_date) ||
+		    !(flags & AMEND_MSG)) && !ctx->have_author) {
+			const char *gpg_opt = gpg_sign_opt_quoted(opts);
+			BUG("author not set");
+			return error(_(staged_changes_advice),
+				     gpg_opt, gpg_opt);
+		}
+		if (ctx->have_author) {
+			push_ident_env(opts, &cmd.env);
+		}
 	}
 
-	strvec_pushf(&cmd.env, GIT_REFLOG_ACTION "=%s", ctx->reflog_message);
+	if (!ctx->have_author &&
+	    opts->committer_date_is_author_date && opts->ignore_date)
+		strvec_push(&cmd.env, "GIT_COMMITTER_DATE=");
 
-	if (opts->committer_date_is_author_date)
-		strvec_pushf(&cmd.env, "GIT_COMMITTER_DATE=%s",
-			     opts->ignore_date ?
-			     "" :
-			     author_date_from_env(&cmd.env));
-	if (opts->ignore_date)
-		strvec_push(&cmd.env, "GIT_AUTHOR_DATE=");
+	strvec_pushf(&cmd.env, GIT_REFLOG_ACTION "=%s", ctx->reflog_message);
 
 	strvec_push(&cmd.args, "commit");
 
@@ -1544,8 +1569,7 @@ static int parse_head(struct repository *r, struct commit **head)
  *   0 - success
  *   1 - run 'git commit'
  */
-static int try_to_commit(struct repository *r,
-			 struct strbuf *msg, const char *author,
+static int try_to_commit(struct repository *r, struct strbuf *msg,
 			 struct replay_opts *opts, unsigned int flags,
 			 struct object_id *oid)
 {
@@ -1556,6 +1580,7 @@ static int try_to_commit(struct repository *r,
 	struct commit_extra_header *extra = NULL;
 	struct strbuf err = STRBUF_INIT;
 	struct strbuf commit_msg = STRBUF_INIT;
+	const char *author = ctx->have_author ? ctx->author.buf : NULL;
 	char *amend_author = NULL;
 	const char *committer = NULL;
 	const char *hook_commit = NULL;
@@ -1732,7 +1757,7 @@ static int write_rebase_head(struct object_id *oid)
 }
 
 static int do_commit(struct repository *r, struct strbuf *msg_buf,
-		     const char *msg_file, const char *author,
+		     const char *msg_file,
 		     struct replay_opts *opts, unsigned int flags,
 		     struct object_id *oid)
 {
@@ -1742,7 +1767,7 @@ static int do_commit(struct repository *r, struct strbuf *msg_buf,
 		struct object_id oid;
 
 		assert(msg_file);
-		res = try_to_commit(r, msg_buf, author, opts, flags, &oid);
+		res = try_to_commit(r, msg_buf, opts, flags, &oid);
 		if (!res) {
 			refs_delete_ref(get_main_ref_store(r), "",
 					"CHERRY_PICK_HEAD", NULL, 0);
@@ -2429,7 +2454,6 @@ static int do_pick_commit(struct repository *r,
 	struct object_id head;
 	struct commit *base, *next, *parent;
 	const char *base_label, *next_label;
-	char *author = NULL;
 	struct commit_message msg = { NULL, NULL, NULL, NULL };
 	int res, unborn = 0, reword = 0, allow, drop_commit;
 	const struct todo_item *item = &todo_list->items[todo_list->current];
@@ -2499,8 +2523,6 @@ static int do_pick_commit(struct repository *r,
 	if (opts->allow_ff && !is_fixup(command) &&
 	    ((parent && oideq(&parent->object.oid, &head)) ||
 	     (!parent && unborn))) {
-		if (is_rebase_i(opts))
-			write_author_script(msg.message);
 		res = fast_forward_to(r, &commit->object.oid, &head, unborn,
 			opts);
 		if (res || command != TODO_REWORD)
@@ -2591,8 +2613,11 @@ static int do_pick_commit(struct repository *r,
 			strbuf_addstr(&ctx->message, oid_to_hex(&commit->object.oid));
 			strbuf_addstr(&ctx->message, ")\n");
 		}
-		author = get_author(msg.message);
-
+		if (ctx_set_author(ctx, msg.message)) {
+			res = error(_("could not parse author for commit '%s'"),
+				    short_commit_name(commit));
+			goto leave;
+		}
 		if (command == TODO_REWORD)
 			reword = 1;
 
@@ -2603,9 +2628,7 @@ static int do_pick_commit(struct repository *r,
 
 	assert(!ctx->have_fixup_msg || ctx->current_fixup_count);
 
-	if (is_rebase_i(opts) && write_author_script(msg.message) < 0)
-		res = -1;
-	else if (!opts->strategy ||
+	if (!opts->strategy ||
 		 !strcmp(opts->strategy, "recursive") ||
 		 !strcmp(opts->strategy, "ort") ||
 		 command == TODO_REVERT) {
@@ -2696,9 +2719,8 @@ static int do_pick_commit(struct repository *r,
 				goto leave;
 			*check_todo = 1;
 		}
-		if (author || command == TODO_REVERT || (flags & AMEND_MSG))
-			res = do_commit(r, msg_buf, msg_file,  author, opts,
-					flags,
+		if (ctx->have_author || command == TODO_REVERT || (flags & AMEND_MSG))
+			res = do_commit(r, msg_buf, msg_file, opts, flags,
 					commit? &commit->object.oid : NULL);
 		else
 			res = error(_("unable to parse commit author"));
@@ -2722,7 +2744,6 @@ fast_forward_edit:
 
 leave:
 	free_message(commit, &msg);
-	free(author);
 	update_abort_safety_file();
 
 	return res;
@@ -3420,6 +3441,9 @@ static int read_populate_opts(struct repository *r, struct replay_opts *opts)
 
 		read_strategy_opts(opts, &buf);
 		strbuf_reset(&buf);
+		ret = read_author_ident(ctx);
+		if (ret)
+			goto done_rebase_i;
 
 		ret = read_ctx(r, ctx, &buf);
 		if (ret)
@@ -3932,6 +3956,9 @@ static int error_with_patch(struct repository *r,
 		    write_message(ctx->message.buf, ctx->message.len,
 				  git_path_merge_msg(r), 0))
 			return -1;
+		if (ctx->have_author && write_author_script(ctx->author.buf))
+			return -1;
+
 	}
 	if (commit) {
 		if (make_patch(r, commit, opts))
@@ -4378,7 +4405,11 @@ static int do_merge(struct repository *r,
 				    oid_to_hex(&commit->object.oid));
 			goto leave_merge;
 		}
-		write_author_script(message);
+		if (ctx_set_author(ctx, message)) {
+			ret = error(_("could not parse author for commit '%s'"),
+				    short_commit_name(commit));
+			goto leave_merge;
+		}
 		find_commit_subject(message, &body);
 		len = strlen(body);
 		strbuf_add(&ctx->message, body, len);
@@ -4393,8 +4424,9 @@ static int do_merge(struct repository *r,
 		struct strbuf buf = STRBUF_INIT;
 		int len;
 
-		strbuf_addf(&buf, "author %s", git_author_info(0));
-		write_author_script(buf.buf);
+		strbuf_reset(&ctx->author);
+		strbuf_addstr(&ctx->author, git_author_info(0));
+		ctx->have_author = 1;
 
 		if (oneline_offset < arg_len) {
 			strbuf_add(&ctx->message, arg + oneline_offset,
@@ -4420,20 +4452,8 @@ static int do_merge(struct repository *r,
 		/* Octopus merge */
 		struct child_process cmd = CHILD_PROCESS_INIT;
 
-		if (read_env_script(&cmd.env)) {
-			const char *gpg_opt = gpg_sign_opt_quoted(opts);
-
-			ret = error(_(staged_changes_advice), gpg_opt, gpg_opt);
-			goto leave_merge;
-		}
-
-		if (opts->committer_date_is_author_date)
-			strvec_pushf(&cmd.env, "GIT_COMMITTER_DATE=%s",
-				     opts->ignore_date ?
-				     "" :
-				     author_date_from_env(&cmd.env));
-		if (opts->ignore_date)
-			strvec_push(&cmd.env, "GIT_AUTHOR_DATE=");
+		assert(ctx->have_author);
+		push_ident_env(opts, &cmd.env);
 
 		cmd.git_cmd = 1;
 		strvec_push(&cmd.args, "merge");
@@ -5150,10 +5170,13 @@ static int do_pick_commits(struct repository *r,
 						todo_list->total_nr,
 						opts->verbose ? "\n" : "\r");
 			}
-			unlink(rebase_path_author_script());
 			unlink(git_path_merge_head(r));
 			unlink(git_path_auto_merge(r));
 			delete_ref(NULL, "REBASE_HEAD", NULL, REF_NO_DEREF);
+
+			if (item->command != TODO_COMMENT &&
+			    !is_fixup(item->command))
+				ctx->have_author = 0;
 
 			if (item->command > TODO_SQUASH &&
 			    item->command != TODO_MERGE &&
@@ -5375,6 +5398,8 @@ static int pick_commits(struct repository *r,
 				res = -1;
 			if (write_rewritten_list(r, &ctx->rewritten))
 				res = -1;
+			if (!ctx->have_author)
+				unlink(rebase_path_author_script());
 		}
 	}
 
