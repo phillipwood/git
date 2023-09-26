@@ -455,8 +455,8 @@ static inline int noop_core_config(const char *var UNUSED,
 #define platform_core_config noop_core_config
 #endif
 
-#if !defined(__MINGW32__) && !defined(_MSC_VER) && !defined(GIT_STD_LIB)
 int lstat_cache_aware_rmdir(const char *path);
+#if !defined(__MINGW32__) && !defined(_MSC_VER)
 #define rmdir lstat_cache_aware_rmdir
 #endif
 
@@ -966,10 +966,8 @@ const char *inet_ntop(int af, const void *src, char *dst, size_t size);
 #endif
 
 #ifdef NO_PTHREADS
-#ifdef GIT_STD_LIB
 #define atexit git_atexit
 int git_atexit(void (*handler)(void));
-#endif
 #endif
 
 static inline size_t st_add(size_t a, size_t b)
@@ -1464,17 +1462,14 @@ static inline int is_missing_file_error(int errno_)
 	return (errno_ == ENOENT || errno_ == ENOTDIR);
 }
 
-#ifndef GIT_STD_LIB
 int cmd_main(int, const char **);
 
 /*
  * Intercept all calls to exit() and route them to trace2 to
  * optionally emit a message before calling the real exit().
  */
-
 int common_exit(const char *file, int line, int code);
 #define exit(code) exit(common_exit(__FILE__, __LINE__, (code)))
-#endif
 
 /*
  * You can mark a stack variable with UNLEAK(var) to avoid it being

@@ -1,5 +1,4 @@
-Git Standard Library
-================
+= Git Standard Library
 
 The Git Standard Library intends to serve as the foundational library
 and root dependency that other libraries in Git will be built off of.
@@ -9,8 +8,7 @@ This does not mean that the Git Standard Library will be the only
 possible root dependency in the future, but rather the most significant
 and widely used one.
 
-Dependency graph in libified Git
-================
+== Dependency graph in libified Git
 
 If you look in the Git Makefile, all of the objects defined in the Git
 library are compiled and archived into a singular file, libgit.a, which
@@ -57,8 +55,7 @@ if someone wanted their own custom build of Git with their own custom
 implementation of the object store, they would only have to swap out
 object-store.a rather than do a hard fork of Git.
 
-Rationale behind Git Standard Library
-================
+== Rationale behind Git Standard Library
 
 The rationale behind what's in and what's not in the Git Standard
 Library essentially is the result of two observations within the Git
@@ -67,8 +64,7 @@ in a couple of different files, and wrapper.c + usage.c have
 difficult-to-separate circular dependencies with each other and other
 files.
 
-Ubiquity of git-compat-util.h and circular dependencies
-========
+=== Ubiquity of git-compat-util.h and circular dependencies
 
 Every file in the Git codebase includes git-compat-util.h. It serves as
 "a compatibility aid that isolates the knowledge of platform specific
@@ -79,10 +75,9 @@ for wrapper.c and usage.c to be a part of the root library. They have
 difficult to separate circular dependencies with each other so they
 can't be independent libraries. Wrapper.c has dependencies on parse.c,
 abspath.c, strbuf.c, which in turn also have dependencies on usage.c and
-wrapper.c -- more circular dependencies.
+wrapper.c - more circular dependencies.
 
-Tradeoff between swappability and refactoring
-========
+=== Tradeoff between swappability and refactoring
 
 From the above dependency graph, we can see that git-std-lib.a could be
 many smaller libraries rather than a singular library. So why choose a
@@ -99,8 +94,7 @@ and change the API for the library if there becomes enough of a reason
 to do so (remember we are avoiding promising stability of the interfaces
 of those libraries).
 
-Reuse of compatibility functions in git-compat-util.h
-========
+=== Reuse of compatibility functions in git-compat-util.h
 
 Most functions defined in git-compat-util.h are implemented in compat/
 and have dependencies limited to strbuf.h and wrapper.h so they can be
@@ -110,8 +104,7 @@ compat/. The rest of the functions defined in git-compat-util.h are
 implemented in top level files and are hidden behind
 an #ifdef if their implementation is not in git-std-lib.a.
 
-Rationale summary
-========
+=== Rationale summary
 
 The Git Standard Library allows us to get the libification ball rolling
 with other libraries in Git. By not spending many
@@ -123,8 +116,7 @@ the code cleanups that have happened so far have been minor and
 beneficial for the codebase. It is probable that making large movements
 would negatively affect code clarity.
 
-Git Standard Library boundary
-================
+== Git Standard Library boundary
 
 While I have described above some useful heuristics for identifying
 potential candidates for git-std-lib.a, a standard library should not
@@ -150,8 +142,7 @@ to be able to trace functions in those files and other files in git-std-lib.a.
 In order for git-std-lib.a to compile with those dependencies, stubbed out
 versions of those files are implemented and swapped in during compilation time.
 
-Files inside of Git Standard Library
-================
+== Files inside of Git Standard Library
 
 The initial set of files in git-std-lib.a are:
 abspath.c
@@ -171,8 +162,7 @@ complete library:
 stubs/pager.c
 stubs/trace2.c
 
-Pitfalls
-================
+== Pitfalls
 
 There are a small amount of files under compat/* that have dependencies
 not inside of git-std-lib.a. While those functions are not called on
@@ -180,8 +170,7 @@ Linux, other OSes might call those problematic functions. I don't see
 this as a major problem, just moreso an observation that libification in
 general may also require some minor compatibility work in the future.
 
-Testing
-================
+== Testing
 
 Unit tests should catch any breakages caused by changes to files in
 git-std-lib.a (i.e. introduction of a out of scope dependency) and new
