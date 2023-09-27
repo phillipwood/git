@@ -10,7 +10,7 @@
  * Some inline/trivial functions are skipped
  */
 
-void abspath_funcs(void) {
+static void abspath_funcs(void) {
 	struct strbuf sb = STRBUF_INIT;
 
 	fprintf(stderr, "calling abspath functions\n");
@@ -27,7 +27,7 @@ void abspath_funcs(void) {
 	strbuf_add_real_path(&sb, "foo");
 }
 
-void hex_ll_funcs(void) {
+static void hex_ll_funcs(void) {
 	unsigned char c;
 
 	fprintf(stderr, "calling hex-ll functions\n");
@@ -37,7 +37,7 @@ void hex_ll_funcs(void) {
 	hex_to_bytes(&c, "A1", 2);
 }
 
-void parse_funcs(void) {
+static void parse_funcs(void) {
 	intmax_t foo;
 	ssize_t foo1 = -1;
 	unsigned long foo2;
@@ -61,12 +61,11 @@ static int allow_unencoded_fn(char ch) {
 	return 0;
 }
 
-void strbuf_funcs(void) {
+static void strbuf_funcs(void) {
 	struct strbuf *sb = xmalloc(sizeof(void*));
 	struct strbuf *sb2 = xmalloc(sizeof(void*));
 	struct strbuf sb3 = STRBUF_INIT;
 	struct string_list list = STRING_LIST_INIT_NODUP;
-	char *buf = "foo";
 	int fd = open("/dev/null", O_RDONLY);
 
 	fprintf(stderr, "calling strbuf functions\n");
@@ -125,8 +124,8 @@ void strbuf_funcs(void) {
 	strbuf_addstr_urlencode(sb, "foo", allow_unencoded_fn);
 	strbuf_humanise_bytes(sb, 42);
 	strbuf_humanise_rate(sb, 42);
-	printf_ln("%s", sb);
-	fprintf_ln(stderr, "%s", sb);
+	printf_ln("%s", sb->buf);
+	fprintf_ln(stderr, "%s", sb->buf);
 	xstrdup_tolower("foo");
 	xstrdup_toupper("foo");
 	// xstrvfmt() called by xstrfmt()
@@ -141,10 +140,10 @@ void strbuf_funcs(void) {
 static void error_builtin(const char *err, va_list params) {}
 static void warn_builtin(const char *err, va_list params) {}
 
-static report_fn error_routine = error_builtin;
-static report_fn warn_routine = warn_builtin;
+report_fn error_routine = error_builtin;
+report_fn warn_routine = warn_builtin;
 
-void usage_funcs(void) {
+static void usage_funcs(void) {
 	fprintf(stderr, "calling usage functions\n");
 	// Functions that call exit() are commented out
 
@@ -168,7 +167,8 @@ void usage_funcs(void) {
 	// set_die_is_recursing_routine();
 }
 
-void wrapper_funcs(void) {
+static void wrapper_funcs(void) {
+	int tmp;
 	void *ptr = xmalloc(1);
 	int fd = open("/dev/null", O_RDONLY);
 	struct strbuf sb = STRBUF_INIT;
@@ -176,7 +176,6 @@ void wrapper_funcs(void) {
 	char host[PATH_MAX], path[PATH_MAX], path1[PATH_MAX];
 	xsnprintf(path, sizeof(path), "out-XXXXXX");
 	xsnprintf(path1, sizeof(path1), "out-XXXXXX");
-	int tmp;
 
 	fprintf(stderr, "calling wrapper functions\n");
 
@@ -219,7 +218,7 @@ void wrapper_funcs(void) {
 	pread_in_full(fd, &sb, 1, 0);
 }
 
-int main() {
+int main(int argc, const char **argv) {
 	abspath_funcs();
 	hex_ll_funcs();
 	parse_funcs();

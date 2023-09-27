@@ -151,6 +151,8 @@ perf:
 .PHONY: pre-clean $(T) aggregate-results clean valgrind perf \
 	check-chainlint clean-chainlint test-chainlint
 
+.PHONY: test-git-std-lib
+
 test-git-std-lib:
-	cc -It -o stdlib-test stdlib-test.c -L. -l:../git-std-lib.a
+	$(MAKE) -C .. t/stdlib-test
 	./stdlib-test
