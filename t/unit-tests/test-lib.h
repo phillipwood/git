@@ -42,18 +42,21 @@ void test_msg(const char *format, ...);
 
 /*
  * Test checks are built around test_assert(). checks return 1 on
- * success, 0 on failure. If any check fails then the test will
- * fail. To create a custom check define a function that wraps
- * test_assert() and a macro to wrap that function. For example:
+ * success, 0 on failure. If any check fails then the test will fail. To
+ * create a custom check define a function that wraps test_assert() and
+ * a macro to wrap that function to provide a source location and
+ * stringified arguments. Custom checks that take pointer arguments
+ * should be careful to check that they are non-NULL before
+ * dereferencing them. For example:
  *
  *  static int check_oid_loc(const char *loc, const char *check,
  *			     struct object_id *a, struct object_id *b)
  *  {
- *	    int res = test_assert(loc, check, oideq(a, b));
+ *	    int res = test_assert(loc, check, a && b && oideq(a, b));
  *
- *	    if (res) {
- *		    test_msg("   left: %s", oid_to_hex(a);
- *		    test_msg("  right: %s", oid_to_hex(a);
+ *	    if (!res) {
+ *		    test_msg("   left: %s", a ? oid_to_hex(a) : "NULL";
+ *		    test_msg("  right: %s", b ? oid_to_hex(a) : "NULL";
  *
  *	    }
  *	    return res;
@@ -79,7 +82,8 @@ int check_bool_loc(const char *loc, const char *check, int ok);
 #define check_int(a, op, b)						\
 	(test__tmp[0].i = (a), test__tmp[1].i = (b),			\
 	 check_int_loc(TEST_LOCATION(), #a" "#op" "#b,			\
-		       test__tmp[0].i op test__tmp[1].i, a, b))
+		       test__tmp[0].i op test__tmp[1].i,		\
+		       test__tmp[0].i, test__tmp[1].i))
 int check_int_loc(const char *loc, const char *check, int ok,
 		  intmax_t a, intmax_t b);
 
@@ -90,7 +94,8 @@ int check_int_loc(const char *loc, const char *check, int ok,
 #define check_uint(a, op, b)						\
 	(test__tmp[0].u = (a), test__tmp[1].u = (b),			\
 	 check_uint_loc(TEST_LOCATION(), #a" "#op" "#b,			\
-			test__tmp[0].u op test__tmp[1].u, a, b))
+			test__tmp[0].u op test__tmp[1].u,		\
+			test__tmp[0].u, test__tmp[1].u))
 int check_uint_loc(const char *loc, const char *check, int ok,
 		   uintmax_t a, uintmax_t b);
 
@@ -101,7 +106,8 @@ int check_uint_loc(const char *loc, const char *check, int ok,
 #define check_char(a, op, b)						\
 	(test__tmp[0].c = (a), test__tmp[1].c = (b),			\
 	 check_char_loc(TEST_LOCATION(), #a" "#op" "#b,			\
-			test__tmp[0].c op test__tmp[1].c, a, b))
+			test__tmp[0].c op test__tmp[1].c,		\
+			test__tmp[0].c, test__tmp[1].c))
 int check_char_loc(const char *loc, const char *check, int ok,
 		   char a, char b);
 
