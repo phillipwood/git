@@ -28,7 +28,7 @@ static void setup_populated(void (*f)(struct strbuf*, void*), char *init_str, vo
 static int assert_sane_strbuf(struct strbuf *buf)
 {
 	/* Initialized strbufs should always have a non-NULL buffer */
-	if (buf->buf == NULL)
+	if (!buf->buf)
 		return 0;
 	/* Buffers should always be NUL-terminated */
 	if (buf->buf[buf->len] != '\0')
