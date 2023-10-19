@@ -973,12 +973,12 @@ foreach(unit_test ${unit_test_PROGRAMS})
 	add_executable("${unit_test}" "${CMAKE_SOURCE_DIR}/t/unit-tests/${unit_test}.c")
 	target_link_libraries("${unit_test}" unit-test-lib common-main)
 	set_target_properties("${unit_test}"
-		PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/t/unit-tests)
+		PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/t/unit-tests/bin)
 	if(MSVC)
 		set_target_properties("${unit_test}"
-			PROPERTIES RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/t/unit-tests)
+			PROPERTIES RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/t/unit-tests/bin)
 		set_target_properties("${unit_test}"
-			PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/t/unit-tests)
+			PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/t/unit-tests/bin)
 	endif()
 	list(APPEND PROGRAMS_BUILT "${unit_test}")
 
@@ -990,7 +990,7 @@ foreach(unit_test ${unit_test_PROGRAMS})
 	if(NOT ${unit_test} STREQUAL "t-basic")
 		add_test(NAME "t.unit-tests.${unit_test}"
 			COMMAND "./${unit_test}"
-			WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/t/unit-tests)
+			WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/t/unit-tests/bin)
 	endif()
 endforeach()
 
