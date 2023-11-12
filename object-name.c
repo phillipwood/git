@@ -2,6 +2,7 @@
 #define DISABLE_SIGN_COMPARE_WARNINGS
 
 #include "git-compat-util.h"
+#include "hash.h"
 #include "object-name.h"
 #include "advice.h"
 #include "config.h"
@@ -1234,33 +1235,328 @@ static int get_oid_oneline(struct repository *r,
 	return found ? 0 : -1;
 }
 
+static bool branch_name_eq(const struct strbuf *sb,
+			   const char *branch, size_t branch_len)
+{
+	return sb->len == branch_len && !memcmp(sb->buf, branch, branch_len);
+}
+
+static bool parse_checkout_from_to(const char *message,
+				   const char **from, size_t *from_len,
+				   const char **to, size_t *to_len)
+{
+	const char *f, *t;
+
+	if (!skip_prefix(message, "checkout: moving from ", &f))
+		return false;
+
+	t = strstr(f, " to ");
+	if (!t)
+		return false;
+
+	*from = f;
+	*from_len = t - f;
+	t += 4;
+	*to = t;
+	*to_len = strlen(message) - (t - message) - 1;
+
+	return true;
+}
+
+static bool is_rebase_start(const char* message)
+{
+	const char *p = strchr(message, ':');
+	const char *needle = " (start): checkout ";
+	size_t offset = strchr(needle, ':') - needle;
+
+	return p && p - message >= offset + 1 && starts_with(p - offset, needle);
+}
+
+static bool parse_rebase_finish(const char* message,
+				const char** branch, size_t *branch_len)
+{
+	const char *p = strchr(message, ':');
+	const char *finish_needle = " (finish): returning to refs/heads/";
+	size_t finish_offset = strchr(finish_needle, ':') - finish_needle;
+	const char *abort_needle = " (abort): returning to refs/heads/";
+	size_t abort_offset = strchr(abort_needle, ':') - abort_needle;
+
+	if (!p)
+		return false;
+	else if (p - message > finish_offset &&
+		 skip_prefix(p - finish_offset, finish_needle, &p))
+		; /* Found match */
+	else if (p - message > abort_offset &&
+		 skip_prefix(p - abort_offset, abort_needle, &p))
+		; /* Found match */
+	else
+		return false;
+
+	*branch = p;
+	*branch_len = strlen(message) - (p - message) - 1;
+
+	return true;
+}
+
+static bool parse_rebase_checkout(struct repository *r, struct ref_store *ref_store,
+				  struct strbuf *buf, struct object_id *oid,
+				  const char *message,
+				  const char **branch, size_t *branch_len)
+{
+	struct commit* commit;
+	size_t off, rev_len;
+	const char *colon = strchr(message, ':'), *rev;
+
+	if (!colon || !skip_prefix(colon, ": checkout ", &rev))
+	    return false;
+
+	/*
+	 * Do not match a commit with a subject that starts with "checkout ".
+	 * If a commit subject extends over multiple lines, "git commit" only
+	 * uses the first line as the reflog message.
+	 */
+	commit = lookup_commit_reference(r, oid);
+
+	if (commit) {
+		const char *commit_buf = repo_logmsg_reencode(r, commit, NULL,
+							      NULL);
+		const char *subject;
+		size_t subject_len = find_commit_subject(commit_buf, &subject);
+		const char *eol = memchr(subject, '\n', subject_len);
+		size_t oneline_len = eol ? eol - subject : subject_len;
+		bool match = strlen(colon + 2) - 1 == oneline_len &&
+			      !memcmp(colon + 2, subject, oneline_len);
+
+		repo_unuse_commit_buffer(r, commit, commit_buf);
+		if (match)
+			return false;
+	}
+
+	/*
+	 * If the checkout revision is a branch copy it, otherwise set
+	 * branch to "" for detached HEAD.
+	 */
+	*branch = rev;
+	*branch_len = 0;
+	off = buf->len;
+	rev_len = strlen(rev) - 1;
+	strbuf_addf(buf, "refs/heads/%.*s", (int)rev_len, rev);
+	if (refs_ref_exists(ref_store, buf->buf + off)) {
+		*branch = rev;
+		*branch_len = rev_len;
+	}
+	strbuf_setlen(buf, off);
+
+	return true;
+}
+
 struct grab_nth_branch_switch_cbdata {
+	struct repository *repo;
+	struct ref_store *ref_store;
 	int remaining;
 	struct strbuf *sb;
+	struct strbuf buf;
+	struct object_id oid;
+	enum {
+		FIND_CHECKOUT_OR_REBASE,
+		FIND_REBASE_START,
+		FIND_BRANCH_NAME
+	} state;
 };
 
 static int grab_nth_branch_switch(const char *refname UNUSED,
-				  struct object_id *ooid UNUSED,
-				  struct object_id *noid UNUSED,
+				  struct object_id *ooid,
+				  struct object_id *noid,
 				  const char *email UNUSED,
 				  timestamp_t timestamp UNUSED,
 				  int tz UNUSED,
 				  const char *message, void *cb_data)
 {
 	struct grab_nth_branch_switch_cbdata *cb = cb_data;
-	const char *match = NULL, *target = NULL;
-	size_t len;
+	const char *branch, *from, *to;
+	size_t branch_len, from_len, to_len;
 
-	if (skip_prefix(message, "checkout: moving from ", &match))
-		target = strstr(match, " to ");
+	/*
+	 * The reflog message from a checkout looks like
+	 *
+	 *     checkout moving from $old_branch_or_oid to $new_branch_or_oid
+	 *
+	 * The reflog messages from rebasing look like
+	 *
+	 *     $REFLOG_ACTION (finish): returning to refs/heads/$branch
+	 *     ...
+	 *     $REFLOG_ACTION (start): checkout $onto
+	 *
+	 * where the "(finish)" message is only present when rebasing a branch
+	 * or
+	 *
+	 *     $REFLOG_ACTION: checkout $revision
+	 *
+	 * when a rebase checks out an up to date revision.
+	 *
+	 * The only way to tell if a branch was checked out by the rebase
+	 * is to continue walking the reflog to find the current branch name
+	 * before the rebase. If we come across a rebase or checkout of the
+	 * same branch then we know the first rebase we saw did not checkout
+	 * the branch. If we come across the start of another rebase without
+	 * seeing the "(finish)" entry then we know that HEAD was detached
+	 * before the first rebase and so it checked out $branch.
+	 *
+	 * Unfortunately when HEAD is detached there is no way to distinguish
+	 * between a rebase that checks out a new detached HEAD and a rebase
+	 * that simply rebases the current detached HEAD. This means we only
+	 * count rebases that checkout
+	 *  - a branch from a detached HEAD
+	 *  - a detached HEAD from a branch
+	 *  - a branch from a different branch
+	 *
+	 * A final complication is that aborting can still checkout a branch.
+	 * The reflog entry looks like
+	 *
+	 *     $REFLOG_ACTION (abort): returning to refs/heads/$branch
+	 *
+	 * which we treat like a "(finish)" entry.
+	 */
 
-	if (!match || !target)
-		return 0;
-	if (--(cb->remaining) == 0) {
-		len = target - match;
-		strbuf_reset(cb->sb);
-		strbuf_add(cb->sb, match, len);
-		return 1; /* we are done */
+	assert(cb->state != FIND_CHECKOUT_OR_REBASE || !cb->buf.len);
+	assert(cb->state != FIND_REBASE_START || cb->buf.len);
+
+	if (parse_checkout_from_to(message, &from, &from_len, &to, &to_len)) {
+		switch (cb->state) {
+		case FIND_REBASE_START:
+			BUG("Invalid state FIND_REBASE_START");
+
+		case FIND_BRANCH_NAME: {
+			size_t off = cb->buf.len;
+			int is_branch;
+
+			/* is "to" a branch name? */
+			strbuf_addf(&cb->buf, "refs/heads/%.*s", (int)to_len, to);
+			is_branch = refs_ref_exists(cb->ref_store,
+						    cb->buf.buf + off);
+			strbuf_setlen(&cb->buf, off);
+			/*
+			 * At least one side of the checkout needs to be a
+			 * branch as we cannot tell if a rebase that rebased a
+			 * detached HEAD checked out a different detached HEAD
+			 * or rebased the existing detached HEAD.
+			 */
+			if ((is_branch && !cb->buf.len) ||
+			    (cb->buf.len && !branch_name_eq(&cb->buf, to, to_len)))
+				/* Last rebase was a checkout */
+				cb->remaining--;
+
+			if (!cb->remaining) {
+				if (is_branch)
+					strbuf_add(cb->sb, to, to_len);
+				else
+					/*
+					 * Detached HEAD, return the value of
+					 * HEAD just before the last rebase.
+					 */
+					strbuf_addstr(cb->sb,
+						      oid_to_hex(&cb->oid));
+				return 1;
+			}
+			cb->state = FIND_CHECKOUT_OR_REBASE;
+		}
+			/* Fall through */
+		case FIND_CHECKOUT_OR_REBASE:
+			if (cb->remaining == 1) {
+				strbuf_add(cb->sb, from, from_len);
+				return 1;
+			}
+			cb->remaining--;
+			strbuf_reset(&cb->buf);
+		}
+	} else if (is_rebase_start(message)) {
+		switch (cb->state) {
+		case FIND_BRANCH_NAME:
+		case FIND_CHECKOUT_OR_REBASE:
+			cb->state = FIND_BRANCH_NAME;
+			/*
+			 * This rebase ended with a detached HEAD. If HEAD
+			 * was already detached at the start we cannot
+			 * distinguish between a rebase that checks out a new
+			 * detached HEAD and one that rebases HEAD so we dont do
+			 * anything if the last rebase did not rebase a branch.
+			 */
+			if (!cb->buf.len)
+				break;
+
+			/* The last rebase checked out a branch. */
+			if (cb->remaining == 1) {
+				/*
+				 * Detached HEAD, return the value of HEAD just
+				 * before the last rebase checked out a branch.
+				 */
+				strbuf_addstr(cb->sb,
+					      oid_to_hex(&cb->oid));
+				return 1;
+			}
+			cb->remaining--;
+			strbuf_reset(&cb->buf);
+			break;
+
+		case FIND_REBASE_START:
+		/*
+		 * This rebase may have checked out a new branch, record HEAD
+		 * before the rebase in case we've gone from a detached HEAD to
+		 * the branch.
+		 */
+		oidcpy(&cb->oid, ooid);
+		cb->state = FIND_BRANCH_NAME;
+		}
+	} else if (parse_rebase_finish(message, &branch, &branch_len)) {
+		switch (cb->state) {
+		case FIND_REBASE_START:
+			BUG("Invalid state FIND_REBASE_START");
+
+		case FIND_BRANCH_NAME:
+			if (!branch_name_eq(&cb->buf, branch, branch_len))
+				/* Last rebase was a checkout */
+				cb->remaining--;
+			if (!cb->remaining) {
+				if (branch_len)
+					strbuf_add(cb->sb, branch, branch_len);
+				else
+					strbuf_addstr(cb->sb,
+						      oid_to_hex(&cb->oid));
+				return 1;
+			}
+			/* Fall through */
+		case FIND_CHECKOUT_OR_REBASE:
+			strbuf_reset(&cb->buf);
+			strbuf_add(&cb->buf, branch, branch_len);
+			cb->state = FIND_REBASE_START;
+		}
+	} else if (parse_rebase_checkout(cb->repo, cb->ref_store, &cb->buf,
+					 noid, message, &branch, &branch_len)) {
+		switch (cb->state) {
+		case FIND_REBASE_START:
+			BUG("Invalid state FIND_REBASE_START");
+
+		case FIND_BRANCH_NAME:
+			/* TODO: be more like checkout to */
+			if (!branch_name_eq(&cb->buf, branch, branch_len))
+				/* Last rebase was a checkout */
+				cb->remaining--;
+			if (!cb->remaining) {
+				if (branch_len)
+					strbuf_add(cb->sb, branch, branch_len);
+				else
+					strbuf_addstr(cb->sb,
+					      oid_to_hex(&cb->oid));
+				return 1;
+			}
+			/* Fall through */
+		case FIND_CHECKOUT_OR_REBASE:
+			cb->state = FIND_BRANCH_NAME;
+			strbuf_reset(&cb->buf);
+			strbuf_add(&cb->buf, branch, branch_len);
+			if (branch_len) /* This rebase checked out a branch */
+				oidcpy(&cb->oid, ooid);
+		}
 	}
 	return 0;
 }
@@ -1275,7 +1571,7 @@ static int interpret_nth_prior_checkout(struct repository *r,
 {
 	long nth;
 	int retval;
-	struct grab_nth_branch_switch_cbdata cb;
+	struct grab_nth_branch_switch_cbdata cb = { .repo = r, .buf = STRBUF_INIT };
 	const char *brace;
 	char *num_end;
 
@@ -1293,9 +1589,11 @@ static int interpret_nth_prior_checkout(struct repository *r,
 		return -1;
 	cb.remaining = nth;
 	cb.sb = buf;
+	cb.ref_store = get_main_ref_store(r);
 
-	retval = refs_for_each_reflog_ent_reverse(get_main_ref_store(r),
+	retval = refs_for_each_reflog_ent_reverse(cb.ref_store,
 			"HEAD", grab_nth_branch_switch, &cb);
+	strbuf_release(&cb.buf);
 	if (0 < retval) {
 		retval = brace - name + 1;
 	} else

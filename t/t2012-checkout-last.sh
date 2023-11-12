@@ -27,6 +27,12 @@ test_cmp_symbolic_HEAD_ref () {
 	test_cmp expect actual
 }
 
+test_nth_checkout () {
+	echo refs/heads/"$2" >expect &&
+	git rev-parse --symbolic-full-name @{-"$1"} >actual &&
+	test_cmp expect actual
+}
+
 test_expect_success '"checkout -" switches back' '
 	git checkout - &&
 	test_cmp_symbolic_HEAD_ref main
@@ -146,7 +152,19 @@ test_expect_success '"checkout -" works after a rebase A B' '
 	git checkout other &&
 	git rebase main moodle &&
 	git checkout - &&
-	test_cmp_symbolic_HEAD_ref main
+	test_cmp_symbolic_HEAD_ref other
+'
+
+test_expect_success '"checkout -" works after switching to up to date branch with rebase' '
+	git branch -f moodle main~1 &&
+	git checkout main &&
+	git checkout other &&
+	git rebase main moodle &&
+	git rebase main other &&
+	git rebase other main &&
+	test_nth_checkout 1 other &&
+	test_nth_checkout 2 moodle &&
+	test_nth_checkout 3 other
 '
 
 test_expect_success '"checkout -" works after a rebase -i A' '
@@ -163,7 +181,7 @@ test_expect_success '"checkout -" works after a rebase -i A B' '
 	git checkout other &&
 	git rebase main foodle &&
 	git checkout - &&
-	test_cmp_symbolic_HEAD_ref main
+	test_cmp_symbolic_HEAD_ref other
 '
 
 test_done

@@ -20,6 +20,7 @@ test_expect_success 'setup' '
 	make_commit 1 &&
 	git branch side &&
 	make_commit 2 &&
+	git branch topic &&
 	make_commit 3 &&
 	git checkout side &&
 	make_commit 4 &&
@@ -28,6 +29,8 @@ test_expect_success 'setup' '
 
 '
 
+#   topic
+#     \
 # 1 -- 2 -- 3 main
 #  \         \
 #   \         \
@@ -57,6 +60,20 @@ test_expect_success '@{-2} works' '
 
 test_expect_success '@{-3} fails' '
 	test_must_fail git rev-parse @{-3}
+'
+
+test_expect_success 'rebase' '
+	git rebase -i topic side^0 &&
+	test_commit "checkout main" A.t A A &&
+	git rebase side topic &&
+	git rebase -i main^ main^1 &&
+	test_commit B &&
+	git rebase main main &&
+	git reflog HEAD &&
+	test_cmp_rev @{-1} B &&
+	test_cmp_rev @{-2} topic &&
+	test_cmp_rev @{-3} A &&
+	test_cmp_rev @{-4} main
 '
 
 test_done
