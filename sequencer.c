@@ -5065,9 +5065,9 @@ static int commit_staged_changes(struct repository *r,
 			return error(_("invalid contents: '%s'"),
 				rebase_path_amend());
 		if (!is_clean && !oideq(&head, &to_amend))
-			return error(_("\nYou have uncommitted changes in your "
-				       "working tree. Please, commit them\n"
-				       "first and then run 'git rebase "
+			return error(_("you have uncommitted changes in your "
+				       "working tree. Please, commit\n"
+				       "them first and then run 'git rebase "
 				       "--continue' again."));
 		/*
 		 * When skipping a failed fixup/squash, we need to edit the

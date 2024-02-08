@@ -589,8 +589,13 @@ test_expect_success 'auto-amend only edited commits after "edit"' '
 		git add file7 &&
 		test_tick &&
 		test_must_fail env FAKE_COMMIT_MESSAGE="and again" \
-			git rebase --continue
+			git rebase --continue 2>actual
 	) &&
+	cat >expect <<-EOF &&
+	error: you have uncommitted changes in your working tree. Please, commit
+	them first and then run ${SQ}git rebase --continue${SQ} again.
+	EOF
+	test_cmp expect actual &&
 	git rebase --abort
 '
 
