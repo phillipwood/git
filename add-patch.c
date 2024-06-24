@@ -1362,6 +1362,9 @@ static int check_edited_hunk_header(struct matches *matches, struct hunk *hunk,
 	size_t *m, nr = 0, len = matches->len_str, i;
 	int res = 0;
 
+	fprintf(stderr, "substring length %lu, subsequence length %lu\n",
+		len, matches->len_seq);
+
 	ALLOC_ARRAY(m, matches->nr);
 	for (i = 0; i < matches->nr; i++) {
 		size_t off_a = matches->match[i].off_a;
@@ -1373,6 +1376,9 @@ static int check_edited_hunk_header(struct matches *matches, struct hunk *hunk,
 		 * original or edited hunk through to the end of
 		 * either one.
 		 */
+		fprintf(stderr, "match 1 off_a %lu, off_b %lu, matches end %d %d\n",
+			off_a, off_b, off_a + len == hunk->orig_image.nr,
+			off_b + len == edited->image.nr);
 		if (matches->len_seq == len && (!off_a || !off_b) &&
 			  (off_a + len == hunk->orig_image.nr ||
 			  off_b + len == edited->image.nr)) {
