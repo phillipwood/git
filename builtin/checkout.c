@@ -691,8 +691,10 @@ static void describe_detached_head(const char *msg, struct commit *commit)
 	strbuf_release(&sb);
 }
 
+#define ERROR_FLAG_WRITEOUT (1u << 0)
+
 static int reset_tree(struct tree *tree, const struct checkout_opts *o,
-		      int worktree, int *writeout_error,
+		      int worktree, unsigned int *error_flags,
 		      struct branch_info *info)
 {
 	struct unpack_trees_options opts;
@@ -718,7 +720,7 @@ static int reset_tree(struct tree *tree, const struct checkout_opts *o,
 	init_tree_desc(&tree_desc, &tree->object.oid, tree->buffer, tree->size);
 	switch (unpack_trees(1, &tree_desc, &opts)) {
 	case -2:
-		*writeout_error = 1;
+		*error_flags |= ERROR_FLAG_WRITEOUT;
 		/*
 		 * We return 0 nevertheless, as the index is all right
 		 * and more importantly we have made best efforts to
@@ -778,7 +780,7 @@ static void init_topts(struct unpack_trees_options *topts, int merge,
 static int merge_working_tree(const struct checkout_opts *opts,
 			      struct branch_info *old_branch_info,
 			      struct branch_info *new_branch_info,
-			      int *writeout_error)
+			      unsigned int *error_flags)
 {
 	int ret;
 	struct lock_file lock_file = LOCK_INIT;
@@ -803,7 +805,7 @@ static int merge_working_tree(const struct checkout_opts *opts,
 				     oid_to_hex(&new_branch_info->commit->object.oid));
 	}
 	if (opts->discard_changes) {
-		ret = reset_tree(new_tree, opts, 1, writeout_error, new_branch_info);
+		ret = reset_tree(new_tree, opts, 1, error_flags, new_branch_info);
 		if (ret)
 			return ret;
 	} else {
@@ -895,7 +897,7 @@ static int merge_working_tree(const struct checkout_opts *opts,
 
 			ret = reset_tree(new_tree,
 					 opts, 1,
-					 writeout_error, new_branch_info);
+					 error_flags, new_branch_info);
 			if (ret)
 				return ret;
 			o.ancestor = old_branch_info->name;
@@ -916,7 +918,7 @@ static int merge_working_tree(const struct checkout_opts *opts,
 				exit(128);
 			ret = reset_tree(new_tree,
 					 opts, 0,
-					 writeout_error, new_branch_info);
+					 error_flags, new_branch_info);
 			strbuf_release(&o.obuf);
 			strbuf_release(&old_commit_shortname);
 			if (ret)
@@ -1165,7 +1167,8 @@ static int switch_branches(const struct checkout_opts *opts,
 	int ret = 0;
 	struct branch_info old_branch_info = { 0 };
 	struct object_id rev;
-	int flag, writeout_error = 0;
+	int flag;
+	unsigned int error_flags = 0;
 	int do_merge = 1;
 
 	trace2_cmd_mode("branch");
@@ -1205,7 +1208,7 @@ static int switch_branches(const struct checkout_opts *opts,
 	}
 
 	if (do_merge) {
-		ret = merge_working_tree(opts, &old_branch_info, new_branch_info, &writeout_error);
+		ret = merge_working_tree(opts, &old_branch_info, new_branch_info, &error_flags);
 		if (ret) {
 			branch_info_release(&old_branch_info);
 			return ret;
@@ -1220,7 +1223,7 @@ static int switch_branches(const struct checkout_opts *opts,
 	ret = post_checkout_hook(old_branch_info.commit, new_branch_info->commit, 1);
 	branch_info_release(&old_branch_info);
 
-	return ret || writeout_error;
+	return ret || error_flags;
 }
 
 static int git_checkout_config(const char *var, const char *value,
