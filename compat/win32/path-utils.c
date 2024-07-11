@@ -50,3 +50,28 @@ int win32_offset_1st_component(const char *path)
 
 	return pos + is_dir_sep(*pos) - path;
 }
+
+int win32_fspathcmp(const char *a, const char *b)
+{
+	int diff;
+
+	for (;;) {
+		if (!*a)
+			return !*b ? 0 : -1;
+		if (!*b)
+			return +1;
+
+		if (is_dir_sep(*a)) {
+			if (!is_dir_sep(*b))
+				return -1;
+			a++;
+			b++;
+			continue;
+		} else if (is_dir_sep(*b))
+			return +1;
+
+		diff = (unsigned char)tolower(*(a++)) - (unsigned char)tolower(*(b++));
+		if (diff)
+			return diff;
+	}
+}
