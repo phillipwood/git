@@ -1164,4 +1164,36 @@ test_expect_success 'reset -p with unmerged files' '
 	test_must_be_empty staged
 '
 
+test_expect_success 'splitting handles diff.suppressBlankEmpty' '
+	test_when_finished "git reset --hard" &&
+	cat >file <<-\EOF &&
+	1
+	2
+
+	3
+	4
+	EOF
+	git add file &&
+
+	cat >file <<-\EOF &&
+	one
+	two
+
+	three
+	four
+	EOF
+	test_write_lines s n y |
+	git -c diff.suppressBlankEmpty=true add -p &&
+
+	git cat-file blob :file >actual &&
+	cat >expect <<-\EOF &&
+	1
+	2
+
+	three
+	four
+	EOF
+	test_cmp expect actual
+'
+
 test_done

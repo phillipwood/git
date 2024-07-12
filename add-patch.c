@@ -588,7 +588,7 @@ static int parse_diff(struct add_p_state *s, const struct pathspec *ps)
 			    (int)(eol - (plain->buf + file_diff->head.start)),
 			    plain->buf + file_diff->head.start);
 
-		if ((marker == '-' || marker == '+') && *p == ' ')
+		if ((marker == '-' || marker == '+') && (*p == ' ' || *p == '\n'))
 			hunk->splittable_into++;
 		if (marker && *p != '\\')
 			marker = *p;
@@ -964,7 +964,7 @@ static int split_hunk(struct add_p_state *s, struct file_diff *file_diff,
 		 * Is this the first context line after a chain of +/- lines?
 		 * Then record the start of the next split hunk.
 		 */
-		if ((marker == '-' || marker == '+') && ch == ' ') {
+		if ((marker == '-' || marker == '+') && (ch == ' ' || ch == '\n')) {
 			first = 0;
 			hunk[1].start = current;
 			if (colored)
@@ -979,14 +979,14 @@ static int split_hunk(struct add_p_state *s, struct file_diff *file_diff,
 		 * Then just increment the appropriate counter and continue
 		 * with the next line.
 		 */
-		if (marker != ' ' || (ch != '-' && ch != '+')) {
+		if ((marker != ' ' && marker != '\n') || (ch != '-' && ch != '+')) {
 next_hunk_line:
 			/* Comment lines are attached to the previous line */
 			if (ch == '\\')
 				ch = marker ? marker : ' ';
 
 			/* current hunk not done yet */
-			if (ch == ' ')
+			if (ch == ' ' || ch == '\n')
 				context_line_count++;
 			else if (ch == '-')
 				header->old_count++;
