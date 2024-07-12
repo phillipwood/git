@@ -95,7 +95,7 @@ int count_slashes(const char *s)
 	return cnt;
 }
 
-int fspathcmp(const char *a, const char *b)
+int git_fspathcmp(const char *a, const char *b)
 {
 	return ignore_case ? strcasecmp(a, b) : strcmp(a, b);
 }
