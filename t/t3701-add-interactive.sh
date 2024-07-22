@@ -612,12 +612,23 @@ test_expect_success TTY 'print again the hunk (PAGER)' '
 	test_cmp expect actual.trimmed
 '
 
+test_quirk () {
+	echo "in test_quirk: GIT_PAGER=$GIT_PAGER"
+	echo "in env: GIT_PAGER=$(env | grep GIT_PAGER=)"
+	test_terminal git add -p
+	true
+}
+
 test_expect_success TTY 'P handles SIGPIPE when writing to pager' '
 	test_when_finished "rm -f huge_file; git reset" &&
 	printf "\n%2500000s" Y >huge_file &&
 	git add -N huge_file &&
-	test_write_lines P q | GIT_PAGER="head -n 1" test_terminal git add -p
+	echo "in env: GIT_PAGER=$(env | grep GIT_PAGER=)" &&
+	test_write_lines P q | GIT_PAGER="head -n 1" test_quirk &&
+	echo "after test_quirk returns: GIT_PAGER=$GIT_PAGER"
 '
+
+exit
 
 test_expect_success 'split hunk "add -p (edit)"' '
 	# Split, say Edit and do nothing.  Then:
