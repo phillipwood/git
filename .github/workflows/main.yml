@@ -114,7 +114,7 @@ jobs:
       fail-fast: false
       matrix:
         vector:
-	  - jobname: linux-gcc
+          - jobname: linux-gcc
             cc: gcc
             cc_package: gcc-8
             pool: ubuntu-20.04
