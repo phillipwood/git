@@ -15,6 +15,36 @@
 #include "block-sha1/sha1.h"
 #endif
 
+#if defined(SHA1_APPLE_FAST)
+#  include <CommonCrypto/CommonDigest.h>
+#  define platform_SHA_CTX_fast CC_SHA1_CTX
+#  define platform_SHA1_Init_fast CC_SHA1_Init
+#  define platform_SHA1_Update_fast CC_SHA1_Update
+#  define platform_SHA1_Final_fast CC_SHA1_Final
+#elif defined(SHA1_OPENSSL_FAST)
+#  include <openssl/sha.h>
+#  if defined(OPENSSL_API_LEVEL) && OPENSSL_API_LEVEL >= 3
+#    define SHA1_NEEDS_CLONE_HELPER_FAST
+#    include "sha1/openssl.h"
+#    define platform_SHA_CTX_fast openssl_SHA1_CTX
+#    define platform_SHA1_Init_fast openssl_SHA1_Init
+#    define platform_SHA1_Clone_fast openssl_SHA1_Clone
+#    define platform_SHA1_Update_fast openssl_SHA1_Update
+#    define platform_SHA1_Final_fast openssl_SHA1_Final
+#  else
+#    define platform_SHA_CTX_fast SHA_CTX
+#    define platform_SHA1_Init_fast SHA1_Init
+#    define platform_SHA1_Update_fast SHA1_Update
+#    define platform_SHA1_Final_fast SHA1_Final
+#  endif
+#elif defined(SHA1_BLK_FAST)
+#  include "block-sha1/sha1.h"
+#  define platform_SHA_CTX_fast blk_SHA_CTX
+#  define platform_SHA1_Init_fast blk_SHA1_Init
+#  define platform_SHA1_Update_fast blk_SHA1_Update
+#  define platform_SHA1_Final_fast blk_SHA1_Final
+#endif
+
 #if defined(SHA256_NETTLE)
 #include "sha256/nettle.h"
 #elif defined(SHA256_GCRYPT)
@@ -44,13 +74,31 @@
 #define platform_SHA1_Final    	SHA1_Final
 #endif
 
+#ifndef platform_SHA_CTX_fast
+#  define platform_SHA_CTX_fast     platform_SHA_CTX
+#  define platform_SHA1_Init_fast   platform_SHA1_Init
+#  define platform_SHA1_Update_fast platform_SHA1_Update
+#  define platform_SHA1_Final_fast  platform_SHA1_Final
+#  ifdef platform_SHA1_Clone
+#    define platform_SHA1_Clone_fast platform_SHA1_Clone
+#  endif
+#endif
+
 #define git_SHA_CTX		platform_SHA_CTX
 #define git_SHA1_Init		platform_SHA1_Init
 #define git_SHA1_Update		platform_SHA1_Update
 #define git_SHA1_Final		platform_SHA1_Final
 
+#define git_SHA_CTX_fast	platform_SHA_CTX_fast
+#define git_SHA1_Init_fast	platform_SHA1_Init_fast
+#define git_SHA1_Update_fast	platform_SHA1_Update_fast
+#define git_SHA1_Final_fast	platform_SHA1_Final_fast
+
 #ifdef platform_SHA1_Clone
 #define git_SHA1_Clone	platform_SHA1_Clone
+#endif
+#ifdef platform_SHA1_Clone_fast
+#  define git_SHA1_Clone_fast platform_SHA1_Clone_fast
 #endif
 
 #ifndef platform_SHA256_CTX
@@ -77,6 +125,13 @@
 
 #ifndef SHA1_NEEDS_CLONE_HELPER
 static inline void git_SHA1_Clone(git_SHA_CTX *dst, const git_SHA_CTX *src)
+{
+	memcpy(dst, src, sizeof(*dst));
+}
+#endif
+#ifndef SHA1_NEEDS_CLONE_HELPER_FAST
+static inline void git_SHA1_Clone_fast(git_SHA_CTX_fast *dst,
+				       const git_SHA_CTX_fast *src)
 {
 	memcpy(dst, src, sizeof(*dst));
 }
@@ -178,6 +233,8 @@ enum get_oid_result {
 /* A suitably aligned type for stack allocations of hash contexts. */
 union git_hash_ctx {
 	git_SHA_CTX sha1;
+	git_SHA_CTX_fast sha1_fast;
+
 	git_SHA256_CTX sha256;
 };
 typedef union git_hash_ctx git_hash_ctx;
@@ -221,6 +278,21 @@ struct git_hash_algo {
 
 	/* The hash finalization function for object IDs. */
 	git_hash_final_oid_fn final_oid_fn;
+
+	/* The fast / non-cryptographic hash initialization function. */
+	git_hash_init_fn fast_init_fn;
+
+	/* The fast / non-cryptographic hash context cloning function. */
+	git_hash_clone_fn fast_clone_fn;
+
+	/* The fast / non-cryptographic hash update function. */
+	git_hash_update_fn fast_update_fn;
+
+	/* The fast / non-cryptographic hash finalization function. */
+	git_hash_final_fn fast_final_fn;
+
+	/* The fast / non-cryptographic hash finalization function. */
+	git_hash_final_oid_fn fast_final_oid_fn;
 
 	/* The OID of the empty tree. */
 	const struct object_id *empty_tree;
