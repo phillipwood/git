@@ -19,11 +19,20 @@
 `badParentSha1`::
 	(ERROR) A commit object has a bad parent sha1.
 
+`badRefContent`::
+	(ERROR) A ref has bad content.
+
 `badRefFiletype`::
 	(ERROR) A ref has a bad file type.
 
 `badRefName`::
 	(ERROR) A ref has an invalid format.
+
+`badReferentFiletype`::
+	(ERROR) The referent of a symref has a bad file type.
+
+`badReferentName`::
+	(ERROR) The referent name of a symref is invalid.
 
 `badTagName`::
 	(INFO) A tag has an invalid format.
@@ -45,6 +54,9 @@
 
 `emptyName`::
 	(WARN) A path contains an empty name.
+
+`escapeReferent`::
+	(ERROR) The referent of a symref is outside the "ref" directory.
 
 `extraHeaderEntry`::
 	(IGNORE) Extra headers found after `tagger`.
@@ -169,6 +181,19 @@
 
 `nullSha1`::
 	(WARN) Tree contains entries pointing to a null sha1.
+
+`refMissingNewline`::
+	(INFO) A ref does not end with newline. This will be
+	considered an error in the future.
+
+`symlinkRef`::
+	(INFO) A symref uses the symbolic link. This kind of symref may
+	be considered ERROR in the future when totally dropping the
+	symlink support.
+
+`trailingRefContent`::
+	(INFO) A ref has trailing content. This will be
+	considered an error in the future.
 
 `treeNotSorted`::
 	(ERROR) A tree is not properly sorted.

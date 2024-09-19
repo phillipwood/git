@@ -1,6 +1,7 @@
 #define USE_THE_REPOSITORY_VARIABLE
 
 #include "../git-compat-util.h"
+#include "../abspath.h"
 #include "../config.h"
 #include "../copy.h"
 #include "../environment.h"
@@ -568,7 +569,7 @@ stat_ref:
 	buf = sb_contents.buf;
 
 	ret = parse_loose_ref_contents(ref_store->repo->hash_algo, buf,
-				       oid, referent, type, &myerr);
+				       oid, referent, type, NULL, &myerr);
 
 out:
 	if (ret && !myerr)
@@ -605,7 +606,7 @@ static int files_read_symbolic_ref(struct ref_store *ref_store, const char *refn
 int parse_loose_ref_contents(const struct git_hash_algo *algop,
 			     const char *buf, struct object_id *oid,
 			     struct strbuf *referent, unsigned int *type,
-			     int *failure_errno)
+			     const char **trailing, int *failure_errno)
 {
 	const char *p;
 	if (skip_prefix(buf, "ref:", &buf)) {
@@ -627,6 +628,10 @@ int parse_loose_ref_contents(const struct git_hash_algo *algop,
 		*failure_errno = EINVAL;
 		return -1;
 	}
+
+	if (trailing)
+		*trailing = p;
+
 	return 0;
 }
 
@@ -3504,6 +3509,181 @@ typedef int (*files_fsck_refs_fn)(struct ref_store *ref_store,
 				  const char *refs_check_dir,
 				  struct dir_iterator *iter);
 
+/*
+ * Check the symref "referent" and "referent_path". For textual symref,
+ * "referent" would be the content after "refs:". For symlink ref,
+ * "referent" would be the relative path agaignst "gitdir" which should
+ * be the same as the textual symref literally.
+ */
+static int files_fsck_symref_target(struct fsck_options *o,
+				    struct fsck_ref_report *report,
+				    struct strbuf *referent,
+				    struct strbuf *referent_path,
+				    unsigned int symbolic_link)
+{
+	size_t len = referent->len - 1;
+	struct stat st;
+	int ret = 0;
+
+	if (!starts_with(referent->buf, "refs/")) {
+		ret = fsck_report_ref(o, report,
+				      FSCK_MSG_ESCAPE_REFERENT,
+				      "points to ref outside the refs directory");
+		goto out;
+	}
+
+	if (!symbolic_link && referent->buf[referent->len - 1] != '\n') {
+		ret = fsck_report_ref(o, report,
+				      FSCK_MSG_REF_MISSING_NEWLINE,
+				      "missing newline");
+		len++;
+	}
+
+	if (!symbolic_link)
+		strbuf_rtrim(referent);
+
+	if (check_refname_format(referent->buf, 0)) {
+		ret = fsck_report_ref(o, report,
+				      FSCK_MSG_BAD_REFERENT_NAME,
+				      "points to refname with invalid format");
+		goto out;
+	}
+
+	if (!symbolic_link && len != referent->len) {
+		ret = fsck_report_ref(o, report,
+				      FSCK_MSG_TRAILING_REF_CONTENT,
+				      "trailing garbage in ref");
+	}
+
+	/*
+	 * Dangling symrefs are common and so we don't report them.
+	 */
+	if (lstat(referent_path->buf, &st)) {
+		if (errno != ENOENT) {
+			ret = error_errno(_("unable to stat '%s'"),
+					  referent_path->buf);
+		}
+		goto out;
+	}
+
+	/*
+	 * We cannot distinguish whether "refs/heads/a" is a directory or not by
+	 * using "check_refname_format(referent->buf, 0)". Instead, we need to
+	 * check the file type of the target.
+	 */
+	if (S_ISDIR(st.st_mode)) {
+		ret = fsck_report_ref(o, report,
+				      FSCK_MSG_BAD_REFERENT_FILETYPE,
+				      "points to the directory");
+		goto out;
+	}
+
+out:
+	return ret;
+}
+
+static int files_fsck_refs_content(struct ref_store *ref_store,
+				   struct fsck_options *o,
+				   const char *refs_check_dir,
+				   struct dir_iterator *iter)
+{
+	struct strbuf referent_path = STRBUF_INIT;
+	struct strbuf ref_content = STRBUF_INIT;
+	struct strbuf abs_gitdir = STRBUF_INIT;
+	struct strbuf referent = STRBUF_INIT;
+	struct strbuf refname = STRBUF_INIT;
+	struct fsck_ref_report report = {0};
+	const char *trailing = NULL;
+	unsigned int type = 0;
+	int failure_errno = 0;
+	struct object_id oid;
+	int ret = 0;
+
+	strbuf_addf(&refname, "%s/%s", refs_check_dir, iter->relative_path);
+	report.path = refname.buf;
+
+	if (S_ISLNK(iter->st.st_mode)) {
+		const char* relative_referent_path;
+
+		ret = fsck_report_ref(o, &report,
+				      FSCK_MSG_SYMLINK_REF,
+				      "use deprecated symbolic link for symref");
+
+		strbuf_add_absolute_path(&abs_gitdir, ref_store->gitdir);
+		strbuf_normalize_path(&abs_gitdir);
+		if (!is_dir_sep(abs_gitdir.buf[abs_gitdir.len - 1]))
+			strbuf_addch(&abs_gitdir, '/');
+
+		strbuf_add_real_path(&referent_path, iter->path.buf);
+
+		if (!skip_prefix(referent_path.buf,
+				 abs_gitdir.buf,
+				 &relative_referent_path)) {
+			ret = fsck_report_ref(o, &report,
+					      FSCK_MSG_ESCAPE_REFERENT,
+					      "point to target outside gitdir");
+			goto cleanup;
+		}
+
+		strbuf_addstr(&referent, relative_referent_path);
+		ret = files_fsck_symref_target(o, &report,
+					       &referent, &referent_path, 1);
+
+		goto cleanup;
+	}
+
+	if (strbuf_read_file(&ref_content, iter->path.buf, 0) < 0) {
+		ret = error_errno(_("unable to read ref '%s/%s'"),
+				  refs_check_dir, iter->relative_path);
+		goto cleanup;
+	}
+
+	if (parse_loose_ref_contents(ref_store->repo->hash_algo,
+				     ref_content.buf, &oid, &referent,
+				     &type, &trailing, &failure_errno)) {
+		ret = fsck_report_ref(o, &report,
+				      FSCK_MSG_BAD_REF_CONTENT,
+				      "invalid ref content");
+		goto cleanup;
+	}
+
+	if (!(type & REF_ISSYMREF)) {
+		if (!*trailing) {
+			ret = fsck_report_ref(o, &report,
+					      FSCK_MSG_REF_MISSING_NEWLINE,
+					      "missing newline");
+			goto cleanup;
+		}
+
+		if (*trailing != '\n' || *(trailing + 1)) {
+			ret = fsck_report_ref(o, &report,
+					      FSCK_MSG_TRAILING_REF_CONTENT,
+					      "trailing garbage in ref");
+			goto cleanup;
+		}
+	} else {
+		strbuf_addf(&referent_path, "%s/%s",
+			    ref_store->gitdir, referent.buf);
+		/*
+		 * the referent may contain the spaces and the newline, need to
+		 * trim for path.
+		 */
+		strbuf_rtrim(&referent_path);
+		ret = files_fsck_symref_target(o, &report,
+					       &referent,
+					       &referent_path,
+					       0);
+	}
+
+cleanup:
+	strbuf_release(&refname);
+	strbuf_release(&ref_content);
+	strbuf_release(&referent);
+	strbuf_release(&referent_path);
+	strbuf_release(&abs_gitdir);
+	return ret;
+}
+
 static int files_fsck_refs_name(struct ref_store *ref_store UNUSED,
 				struct fsck_options *o,
 				const char *refs_check_dir,
@@ -3520,7 +3700,7 @@ static int files_fsck_refs_name(struct ref_store *ref_store UNUSED,
 		goto cleanup;
 
 	if (check_refname_format(iter->basename, REFNAME_ALLOW_ONELEVEL)) {
-		struct fsck_ref_report report = { .path = NULL };
+		struct fsck_ref_report report = { 0 };
 
 		strbuf_addf(&sb, "%s/%s", refs_check_dir, iter->relative_path);
 		report.path = sb.buf;
@@ -3586,6 +3766,7 @@ static int files_fsck_refs(struct ref_store *ref_store,
 {
 	files_fsck_refs_fn fsck_refs_fn[]= {
 		files_fsck_refs_name,
+		files_fsck_refs_content,
 		NULL,
 	};
 
