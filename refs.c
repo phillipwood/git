@@ -636,6 +636,7 @@ void expand_ref_prefix(struct strvec *prefixes, const char *prefix)
 		strvec_pushf(prefixes, *p, len, prefix);
 }
 
+#ifndef WITH_BREAKING_CHANGES
 static const char default_branch_name_advice[] = N_(
 "Using '%s' as the name for the initial branch. This default branch name\n"
 "is subject to change. To configure the initial branch name to use in all\n"
@@ -648,24 +649,32 @@ static const char default_branch_name_advice[] = N_(
 "\n"
 "\tgit branch -m <name>\n"
 );
+#endif /* WITH_BREAKING_CHANGES */
 
 char *repo_default_branch_name(struct repository *r, int quiet)
 {
 	const char *config_key = "init.defaultbranch";
 	const char *config_display_key = "init.defaultBranch";
 	char *ret = NULL, *full_ref;
+#ifndef WITH_BREAKING_CHANGES
 	const char *env = getenv("GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME");
 
 	if (env && *env)
 		ret = xstrdup(env);
-	else if (repo_config_get_string(r, config_key, &ret) < 0)
+#endif /* WITH_BREAKING_CHANGES */
+	if (!ret && repo_config_get_string(r, config_key, &ret) < 0)
 		die(_("could not retrieve `%s`"), config_display_key);
 
 	if (!ret) {
+#ifdef WITH_BREAKING_CHANGES
+		ret = xstrdup("main");
+		(void) quiet; /* Silence -Wunused-parameter */
+#else
 		ret = xstrdup("master");
 		if (!quiet)
 			advise_if_enabled(ADVICE_DEFAULT_BRANCH_NAME,
 					  _(default_branch_name_advice), ret);
+#endif /* WITH_BREAKING_CHANGES */
 	}
 
 	full_ref = xstrfmt("refs/heads/%s", ret);

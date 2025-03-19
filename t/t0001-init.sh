@@ -823,7 +823,7 @@ test_expect_success 'overridden default initial branch name (config)' '
 	grep nmb actual
 '
 
-test_expect_success 'advice on unconfigured init.defaultBranch' '
+test_expect_success !WITH_BREAKING_CHANGES 'advice on unconfigured init.defaultBranch' '
 	GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME= git -c color.advice=always \
 		init unconfigured-default-branch-name 2>err &&
 	test_decode_color <err >decoded &&
@@ -838,7 +838,7 @@ test_expect_success 'advice on unconfigured init.defaultBranch disabled' '
 	test_grep ! "hint: " err
 '
 
-test_expect_success 'overridden default main branch name (env)' '
+test_expect_success !WITH_BREAKING_CHANGES 'overridden default main branch name (env)' '
 	test_config_global init.defaultBranch nmb &&
 	GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=env git init main-branch-env &&
 	git -C main-branch-env symbolic-ref HEAD >actual &&
@@ -846,8 +846,9 @@ test_expect_success 'overridden default main branch name (env)' '
 '
 
 test_expect_success 'invalid default branch name' '
-	test_must_fail env GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME="with space" \
-		git init initial-branch-invalid 2>err &&
+	test_must_fail env GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME= \
+		git -c init.defaultBranch="with space" \
+			init initial-branch-invalid 2>err &&
 	test_grep "invalid branch name" err
 '
 
