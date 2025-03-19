@@ -26,8 +26,11 @@ test_description='--ancestry-path'
 #  --ancestry-path G..M -- G.t == L
 #  --ancestry-path --simplify-merges G^..M -- G.t == G L
 
-GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
-export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
+if ! test_lazy_prereq WITH_BREAKING_CHANGES
+then
+	GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
+	export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
+fi
 
 . ./test-lib.sh
 

@@ -20,8 +20,11 @@ one tagged as v1.0.0.  They all have one regular file each.
 
 '
 
-GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
-export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
+if ! test_lazy_prereq WITH_BREAKING_CHANGES
+then
+	GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
+	export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
+fi
 
 . ./test-lib.sh
 . "$TEST_DIRECTORY/lib-loose.sh"

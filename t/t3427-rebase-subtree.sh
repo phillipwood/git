@@ -4,8 +4,11 @@ test_description='git rebase tests for -Xsubtree
 
 This test runs git rebase and tests the subtree strategy.
 '
-GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
-export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
+if ! test_lazy_prereq WITH_BREAKING_CHANGES
+then
+	GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
+	export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
+fi
 
 . ./test-lib.sh
 . "$TEST_DIRECTORY"/lib-rebase.sh

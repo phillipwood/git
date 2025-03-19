@@ -10,8 +10,11 @@ This test runs git pack-refs and git show-ref and checks that the branch
 semantic is still the same.
 '
 
-GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
-export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
+if ! test_lazy_prereq WITH_BREAKING_CHANGES
+then
+	GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
+	export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
+fi
 GIT_TEST_DEFAULT_REF_FORMAT=files
 export GIT_TEST_DEFAULT_REF_FORMAT
 

@@ -2,8 +2,11 @@
 
 test_description="Test that merge state is as expected after failed merge"
 
-GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
-export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
+if ! test_lazy_prereq WITH_BREAKING_CHANGES
+then
+	GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
+	export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
+fi
 . ./test-lib.sh
 
 test_expect_success 'Ensure we restore original state if no merge strategy handles it' '

@@ -1,8 +1,11 @@
 #!/bin/sh
 
 test_description='git annotate'
-GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
-export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
+if ! test_lazy_prereq WITH_BREAKING_CHANGES
+then
+	GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
+	export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
+fi
 
 TEST_CREATE_REPO_NO_TEMPLATE=1
 . ./test-lib.sh

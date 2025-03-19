@@ -6,8 +6,11 @@ Branch name arguments are usually names which are taken to be inside of
 refs/heads/, but we interpret some magic syntax like @{-1}, @{upstream}, etc.
 This script aims to check the behavior of those corner cases.
 '
-GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
-export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
+if ! test_lazy_prereq WITH_BREAKING_CHANGES
+then
+	GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
+	export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
+fi
 
 . ./test-lib.sh
 
