@@ -180,6 +180,33 @@ static void free_stash_info(struct stash_info *info)
 	strbuf_release(&info->revision);
 }
 
+static int check_stash_topology(struct repository *r, struct commit *stash)
+{
+	struct commit *p1, *p2, *p3 = NULL;
+
+	/* stash must have two or three parents */
+	if (!stash->parents || !stash->parents->next ||
+	    (stash->parents->next->next && stash->parents->next->next->next))
+		return -1;
+	p1 = stash->parents->item;
+	p2 = stash->parents->next->item;
+	if (stash->parents->next->next)
+		p3 = stash->parents->next->next->item;
+	if (repo_parse_commit(r, p1) || repo_parse_commit(r, p2) ||
+	    (p3 && repo_parse_commit(r, p3)))
+		return -1;
+	/* p2 must have a single parent, p3 must have no parents */
+	if (!p2->parents || p2->parents->next || (p3 && p3->parents))
+		return -1;
+	if (repo_parse_commit(r, p2->parents->item))
+		return -1;
+	/* p2^1 must equal p1 */
+	if (!oideq(&p1->object.oid, &p2->parents->item->object.oid))
+		return -1;
+
+	return 0;
+}
+
 static void assert_stash_like(struct stash_info *info, const char *revision)
 {
 	if (get_oidf(&info->b_commit, "%s^1", revision) ||
@@ -2101,11 +2128,19 @@ static int do_export_stash(struct repository *r,
 		 */
 		for (i = 0; i < argc; i++) {
 			struct object_id oid;
+			struct commit *stash;
+
 			if (parse_revision(&revision, argv[i], 1) ||
 			    get_oid_with_context(r, revision.buf,
 						 GET_OID_QUIETLY | GET_OID_GENTLY,
 						 &oid, &unused)) {
 				res = error(_("unable to find stash entry %s"), argv[i]);
+				goto out;
+			}
+			stash = lookup_commit_reference(r, &oid);
+			if (!stash || check_stash_topology(r, stash)) {
+				res = error(_("%s does not look like a stash commit"),
+					    argv[i]);
 				goto out;
 			}
 			oid_array_append(&items, &oid);
@@ -2118,6 +2153,7 @@ static int do_export_stash(struct repository *r,
 		for (i = 0;; i++) {
 			char buf[32];
 			struct object_id oid;
+			struct commit *stash;
 
 			snprintf(buf, sizeof(buf), "%d", i);
 			if (parse_revision(&revision, buf, 1) ||
@@ -2125,6 +2161,12 @@ static int do_export_stash(struct repository *r,
 						 GET_OID_QUIETLY | GET_OID_GENTLY,
 						 &oid, &unused))
 				break;
+			stash = lookup_commit_reference(r, &oid);
+			if (!stash || check_stash_topology(r, stash)) {
+				res = error(_("%s does not look like a stash commit"),
+					    revision.buf);
+				goto out;
+			}
 			oid_array_append(&items, &oid);
 		}
 	}
