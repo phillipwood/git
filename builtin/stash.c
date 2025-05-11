@@ -2011,25 +2011,44 @@ static int do_import_stash(struct repository *r, const char *rev)
 	if (repo_get_oid(r, rev, &chain))
 		return error(_("not a valid revision: %s"), rev);
 
+	this = lookup_commit_reference(r, &chain);
+	if (!this)
+		return error(_("not a commit: %s"), rev);
 	/*
 	 * Walk the commit history, finding each stash entry, and load data into
 	 * the array.
 	 */
-	for (i = 0;; i++) {
-		struct object_id tree, oid;
-		char revision[GIT_MAX_HEXSZ + 1];
+	for (;;) {
+		struct commit *stash;
+		struct tree *tree = repo_get_commit_tree(r, this);
 
-		oid_to_hex_r(revision, &chain);
-
-		if (get_oidf(&tree, "%s:", revision) ||
-		    !oideq(&tree, r->hash_algo->empty_tree)) {
-			res = error(_("%s is not a valid exported stash commit"), revision);
+		if (!tree ||
+		    !oideq(&tree->object.oid, r->hash_algo->empty_tree) ||
+		    (this->parents &&
+		     (!this->parents->next || this->parents->next->next))) {
+			res = error(_("%s is not a valid exported stash commit"),
+				    oid_to_hex(&this->object.oid));
 			goto out;
 		}
-		if (get_oidf(&chain, "%s^1", revision) ||
-		    get_oidf(&oid, "%s^2", revision))
+		if (!this->parents)
 			break;
-		oid_array_append(&items, &oid);
+		stash = this->parents->next->item;
+		if (repo_parse_commit(r, this->parents->item) ||
+		    repo_parse_commit(r, stash)) {
+			res = error(_("cannot parse parents of commit: %s"),
+				     oid_to_hex(&this->object.oid));
+			goto out;
+		}
+		if (check_stash_topology(r, stash)) {
+			res = error(_("%s does not look like a stash commit"),
+				    oid_to_hex(&stash->object.oid));
+			goto out;
+		}
+		/* TODO:
+		 *  - store commits, not objects
+		 */
+		oid_array_append(&items, &this->parents->next->item->object.oid);
+		this = this->parents->item;
 	}
 
 	/*
