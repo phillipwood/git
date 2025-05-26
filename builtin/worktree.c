@@ -592,6 +592,7 @@ static int add_worktree(const char *path, const char *refname,
 	if (opts->checkout &&
 	    (ret = checkout_worktree(opts, &child_env)))
 		goto done;
+	run_hooks_l(the_repository, "worktree-add", path, NULL);
 
 	is_junk = 0;
 	FREE_AND_NULL(junk_work_tree);

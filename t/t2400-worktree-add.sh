@@ -97,6 +97,27 @@ test_expect_success '"add" worktree from a subdir' '
 	)
 '
 
+test_expect_success 'worktree-add hook' '
+	mkdir .git/hooks &&
+	write_script .git/hooks/worktree-add <<-\EOF &&
+	{
+		echo $#
+		test-tool path-utils real_path "$1"
+	} >actual
+	EOF
+	test_when_finished "rm -r .git/hooks" &&
+	(
+		cd sub &&
+		git worktree add ../wt
+	) &&
+	test_when_finished "rm -r wt" &&
+	cat >expect <<-EOF &&
+	1
+	$(test-tool path-utils real_path "$(pwd)/wt")
+	EOF
+	test_cmp expect actual
+'
+
 test_expect_success '"add" from a linked checkout' '
 	(
 		cd here &&

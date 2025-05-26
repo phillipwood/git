@@ -105,6 +105,11 @@ passed to the command. In the event the repository has a remote and
 `--guess-remote` is used, but no remote or local branches exist, then the
 command fails with a warning reminding the user to fetch from their remote
 first (or override by using `-f`/`--force`).
++
+Once the worktree has been created and _<commit-ish>_ has been checked
+out the `worktree-add` hook is invoked with the path to the new
+worktree.  This hook can be used to initalize untracked configuration
+files or setup the project's build system in the new worktree.
 
 `list`::
 
