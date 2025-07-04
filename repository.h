@@ -161,6 +161,11 @@ struct repository {
 
 	/* Indicate if a repository has a different 'commondir' from 'gitdir' */
 	unsigned different_commondir:1;
+
+#ifdef WITH_BREAKING_CHANGES
+	/* Should repo_config() check for deprecated settings */
+	bool check_deprecated_config;
+#endif /* WITH_BREAKING_CHANGES */
 };
 
 #ifdef USE_THE_REPOSITORY_VARIABLE

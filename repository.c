@@ -57,6 +57,9 @@ void initialize_repository(struct repository *repo)
 	repo->parsed_objects = parsed_object_pool_new(repo);
 	ALLOC_ARRAY(repo->index, 1);
 	index_state_init(repo->index, repo);
+#ifdef WITH_BREAKING_CHANGES
+	repo->check_deprecated_config = true;
+#endif /* WITH_BREAKING_CHANGES */
 
 	/*
 	 * When a command runs inside a repository, it learns what
