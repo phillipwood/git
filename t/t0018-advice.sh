@@ -2,7 +2,7 @@
 
 test_description='Test advise_if_enabled functionality'
 
-GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=trunk
+GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
 export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
 . ./test-lib.sh
@@ -33,7 +33,7 @@ test_expect_success 'advice should not be printed when config variable is set to
 
 test_expect_success 'advice should not be printed when --no-advice is used' '
 	q_to_tab >expect <<-\EOF &&
-	On branch trunk
+	On branch main
 
 	No commits yet
 
@@ -55,7 +55,7 @@ test_expect_success 'advice should not be printed when --no-advice is used' '
 
 test_expect_success 'advice should not be printed when GIT_ADVICE is set to false' '
 	q_to_tab >expect <<-\EOF &&
-	On branch trunk
+	On branch main
 
 	No commits yet
 
@@ -77,7 +77,7 @@ test_expect_success 'advice should not be printed when GIT_ADVICE is set to fals
 
 test_expect_success 'advice should be printed when GIT_ADVICE is set to true' '
 	q_to_tab >expect <<-\EOF &&
-	On branch trunk
+	On branch main
 
 	No commits yet
 
