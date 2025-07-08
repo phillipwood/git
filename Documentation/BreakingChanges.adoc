@@ -183,6 +183,10 @@ These features will be removed.
   timeframe, in preference to its synonym "--annotate-stdin".  Git 3.0
   removes the support for "--stdin" altogether.
 
+* Support for `core.commentString=auto` has been deprecated and will
+  be removed in Git 3.0.
++
+cf. <xmqqa59i45wc.fsf@gitster.g>
 
 == Superseded features that will not be deprecated
 

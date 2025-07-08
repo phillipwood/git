@@ -111,7 +111,9 @@ int protect_ntfs = PROTECT_NTFS_DEFAULT;
  */
 const char *comment_line_str = "#";
 char *comment_line_str_to_free;
+#ifndef WITH_BREAKING_CHANGES
 int auto_comment_line_char;
+#endif /* WITH_BREAKING_CHANGES */
 
 /* Parallel index stat data preload? */
 int core_preload_index = 1;
