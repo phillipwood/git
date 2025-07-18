@@ -6,10 +6,12 @@ test_description='last-modified tests'
 
 test_expect_success 'setup' '
 	test_commit 1 file &&
+	TREE1=$(git rev-parse HEAD^{tree}) &&
 	mkdir a &&
 	test_commit 2 a/file &&
 	mkdir a/b &&
-	test_commit 3 a/b/file
+	test_commit 3 a/b/file &&
+	TREE3=$(git rev-parse HEAD^{tree})
 '
 
 test_expect_success 'cannot run last-modified on two trees' '
@@ -49,10 +51,10 @@ test_expect_success 'last-modified non-recursive' '
 '
 
 test_expect_success 'last-modified extended output' '
-	check_last_modified --extended <<-\EOF
+	check_last_modified --extended <<-EOF
 	path a
 	commit 3
-	tree e9a947598482012e54c9c5d3635d5b526b43a6a4
+	tree $TREE3
 	parent 2
 	author A U Thor <author@example.com> 1112912113 -0700
 	committer C O Mitter <committer@example.com> 1112912113 -0700
@@ -61,7 +63,7 @@ test_expect_success 'last-modified extended output' '
 
 	path file
 	commit 1
-	tree f27c6ae26adb8396d3861976ba268f87ad8afa0b
+	tree $TREE1
 	author A U Thor <author@example.com> 1112911993 -0700
 	committer C O Mitter <committer@example.com> 1112911993 -0700
 
