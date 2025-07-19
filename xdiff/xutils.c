@@ -21,7 +21,7 @@
  */
 
 #include "xinclude.h"
-
+#include <xxhash.h>
 
 long xdl_bogosqrt(long n) {
 	long i;
@@ -295,14 +295,12 @@ unsigned long xdl_hash_record_with_whitespace(char const **data,
 }
 
 unsigned long xdl_hash_record_verbatim(char const **data, char const *top) {
-	unsigned long ha = 5381;
-	char const *ptr = *data;
+	long ha;
+	char const *eol = memchr(*data, '\n', top - *data);
+	size_t len = (eol ? eol : top) - *data;
 
-	for (; ptr < top && *ptr != '\n'; ptr++) {
-		ha += (ha << 5);
-		ha ^= (unsigned long) *ptr;
-	}
-	*data = ptr < top ? ptr + 1: ptr;
+	ha = XXH3_64bits(*data, len);
+	*data += len + !!eol;
 
 	return ha;
 }
