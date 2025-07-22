@@ -20,11 +20,20 @@ test_repo_info () {
 	key=$3
 	expected_value=$4
 
-	test_expect_success "$label" '
+	test_expect_success "null-terminated: $label" '
+		test_when_finished "rm -rf repo" &&
+		eval "$init_command" &&
+		echo "$expected_value" | lf_to_nul >expected &&
+		git -C repo repo info --format=null "$key" >output &&
+		tail -n 1 output >actual &&
+		test_cmp expected actual
+	'
+
+	test_expect_success "key-value: $label" '
 		test_when_finished "rm -rf repo" &&
 		eval "$init_command" &&
 		echo "$expected_value" >expected &&
-		git -C repo repo info "$key" >output &&
+		git -C repo repo info --format=keyvalue "$key" >output &&
 		cut -d "=" -f 2 <output >actual &&
 		test_cmp expected actual
 	'
