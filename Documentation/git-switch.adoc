@@ -123,7 +123,6 @@ variable.
 	submodule content is also restored to match the switching
 	target. This is used to throw away local changes.
 
-`-m`::
 `--merge`::
 	If you have local modifications to one or more files that are
 	different between the current branch and the branch to which

@@ -82,7 +82,6 @@ Note that during `git rebase` and `git pull --rebase`, `ours` and
 `theirs` may appear swapped. See the explanation of the same options
 in linkgit:git-checkout[1] for details.
 
-`-m`::
 `--merge`::
 	When restoring files on the working tree from the index,
 	recreate the conflicted merge in the unmerged paths.
