@@ -36,6 +36,7 @@ Reference-related data:
 `layout`::
 Information about the how the current repository is represented:
 * `bare`: `true` if this is a bare repository, otherwise `false`.
+* `shallow`: `true` if this is a shallow repository, otherwise `false`.
 
 SEE ALSO
 --------

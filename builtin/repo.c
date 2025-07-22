@@ -4,6 +4,7 @@
 #include "parse-options.h"
 #include "refs.h"
 #include "environment.h"
+#include "shallow.h"
 
 typedef const char *get_value_fn(struct repository *repo);
 
@@ -17,6 +18,11 @@ static const char *get_layout_bare(struct repository *repo UNUSED)
 	return is_bare_repository() ? "true" : "false";
 }
 
+static const char *get_layout_shallow(struct repository *repo)
+{
+	return is_repository_shallow(repo) ? "true" : "false";
+}
+
 static const char *get_references_format(struct repository *repo)
 {
 	return ref_storage_format_to_name(repo->ref_storage_format);
@@ -25,6 +31,7 @@ static const char *get_references_format(struct repository *repo)
 /* repo_info_fields keys should be in lexicographical order */
 static const struct field repo_info_fields[] = {
 	{ "layout.bare", get_layout_bare },
+	{ "layout.shallow", get_layout_shallow },
 	{ "references.format", get_references_format },
 };
 
