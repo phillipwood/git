@@ -1700,13 +1700,9 @@ static struct option *add_common_options(struct checkout_opts *opts,
 	struct option options[] = {
 		OPT__QUIET(&opts->quiet, N_("suppress progress reporting")),
 		OPT_CALLBACK_F(0, "recurse-submodules", NULL,
-			    "checkout", "control recursive updating of submodules",
-			    PARSE_OPT_OPTARG, option_parse_recurse_submodules_worktree_updater),
+			       "checkout", "control recursive updating of submodules",
+			       PARSE_OPT_OPTARG, option_parse_recurse_submodules_worktree_updater),
 		OPT_BOOL(0, "progress", &opts->show_progress, N_("force progress reporting")),
-		OPT_BOOL('m', "merge", &opts->merge, N_("perform a 3-way merge with the new branch")),
-		OPT_CALLBACK(0, "conflict", opts, N_("style"),
-			     N_("conflict style (merge, diff3, or zdiff3)"),
-			     parse_opt_conflict),
 		OPT_END()
 	};
 	struct option *newopts = parse_options_concat(prevopts, options);
@@ -2001,6 +1997,10 @@ int cmd_checkout(int argc,
 		OPT_BOOL(0, "guess", &opts.dwim_new_local_branch,
 			 N_("second guess 'git checkout <no-such-branch>' (default)")),
 		OPT_BOOL(0, "overlay", &opts.overlay_mode, N_("use overlay mode (default)")),
+		OPT_BOOL('m', "merge", &opts.merge, N_("perform a 3-way merge with the new branch")),
+		OPT_CALLBACK(0, "conflict", &opts, N_("style"),
+			     N_("conflict style (merge, diff3, or zdiff3)"),
+			     parse_opt_conflict),
 		OPT_END()
 	};
 
@@ -2051,6 +2051,10 @@ int cmd_switch(int argc,
 			 N_("second guess 'git switch <no-such-branch>'")),
 		OPT_BOOL(0, "discard-changes", &opts.discard_changes,
 			 N_("throw away local modifications")),
+		OPT_BOOL(0, "merge", &opts.merge, N_("perform a 3-way merge with the new branch")),
+		OPT_CALLBACK(0, "conflict", &opts, N_("style"),
+			     N_("conflict style (merge, diff3, or zdiff3)"),
+			     parse_opt_conflict),
 		OPT_END()
 	};
 
@@ -2085,12 +2089,16 @@ int cmd_restore(int argc,
 		OPT_STRING('s', "source", &opts.from_treeish, "<tree-ish>",
 			   N_("which tree-ish to checkout from")),
 		OPT_BOOL('S', "staged", &opts.checkout_index,
-			   N_("restore the index")),
+			 N_("restore the index")),
 		OPT_BOOL('W', "worktree", &opts.checkout_worktree,
-			   N_("restore the working tree (default)")),
+			 N_("restore the working tree (default)")),
 		OPT_BOOL(0, "ignore-unmerged", &opts.ignore_unmerged,
 			 N_("ignore unmerged entries")),
 		OPT_BOOL(0, "overlay", &opts.overlay_mode, N_("use overlay mode")),
+		OPT_BOOL(0, "merge", &opts.merge, N_("perform a 3-way merge with the new branch")),
+		OPT_CALLBACK(0, "conflict", &opts, N_("style"),
+			     N_("conflict style (merge, diff3, or zdiff3)"),
+			     parse_opt_conflict),
 		OPT_END()
 	};
 
