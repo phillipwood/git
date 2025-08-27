@@ -229,7 +229,7 @@ test_expect_success 'show-ref sub-modes are mutually exclusive' '
 '
 
 test_expect_success '--exists with existing reference' '
-	git show-ref --exists refs/heads/$GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
+	git show-ref --exists refs/heads/main
 '
 
 test_expect_success '--exists with missing reference' '
@@ -237,7 +237,7 @@ test_expect_success '--exists with missing reference' '
 '
 
 test_expect_success '--exists does not use DWIM' '
-	test_expect_code 2 git show-ref --exists $GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME 2>err &&
+	test_expect_code 2 git show-ref --exists main 2>err &&
 	grep "reference does not exist" err
 '
 
@@ -254,7 +254,7 @@ test_expect_success '--exists with bad reference name' '
 
 test_expect_success '--exists with arbitrary symref' '
 	test_when_finished "git symbolic-ref -d refs/symref" &&
-	git symbolic-ref refs/symref refs/heads/$GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME &&
+	git symbolic-ref refs/symref refs/heads/main &&
 	git show-ref --exists refs/symref
 '
 
