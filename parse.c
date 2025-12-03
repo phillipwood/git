@@ -288,8 +288,7 @@ bool parse_signed_from_buf(const char *buf, size_t len, const char **ep,
 	 * ourselves since only we have the signed integer type.
 	 */
 	if (negate) {
-		*ret = u_ret;
-		*ret = -*ret;
+		*ret = 0u - u_ret;
 	} else {
 		*ret = u_ret;
 	}

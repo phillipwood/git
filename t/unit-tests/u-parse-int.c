@@ -96,3 +96,49 @@ void test_parse_int__unsigned(void)
 	cl_invoke(check_unsigned("1053", 1000, ERANGE, 0));
 	cl_invoke(check_unsigned("-17", UINT_MAX, EINVAL, 0));
 }
+
+static void check_signed(const char *buf, intmax_t max,
+			   int expect_errno, intmax_t expect_result)
+{
+	const char *ep;
+	intmax_t result;
+	bool ok;
+
+	errno = 0;
+	ok = parse_signed_from_buf(buf, strlen(buf), &ep, &result, max);
+
+	if (expect_errno) {
+		if (ok)
+			cl_failf("parsing '%s' with max=%"PRIiMAX" should have failed",
+				 buf, max);
+		cl_assert_equal_i(expect_errno, errno);
+		return;
+	}
+
+	if (!ok)
+		cl_failf("parsing '%s' with max=%"PRIiMAX" failed", buf, max);
+	cl_assert_equal_s(ep, "");
+	if (expect_result != result)
+		cl_failf("%"PRIiMAX" != %"PRIiMAX" when parsing '%s'",
+			 expect_result, result, buf);
+}
+
+static const char* format_unsigned(const char *prefix, uintmax_t value)
+{
+	static char buf[32];
+	int ret;
+
+	ret = snprintf(buf, sizeof(buf), "%s%"PRIuMAX, prefix, value);
+	cl_assert(ret > 0);
+	cl_assert(ret < (int)sizeof(buf));
+
+	return buf;
+}
+
+void test_parse_int__signed(void)
+{
+	cl_invoke(check_signed(format_unsigned("+000", (uintmax_t)INTMAX_MAX), INTMAX_MAX, 0, INTMAX_MAX));
+	cl_invoke(check_signed(format_unsigned("", (uintmax_t)INTMAX_MAX + 1u), INTMAX_MAX, ERANGE, 0));
+	cl_invoke(check_signed(format_unsigned("-", (uintmax_t)INTMAX_MAX + 1u), INTMAX_MAX, 0, INTMAX_MIN));
+	cl_invoke(check_signed(format_unsigned("-", (uintmax_t)INTMAX_MAX + 2u), INTMAX_MAX, ERANGE, 0));
+}
