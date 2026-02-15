@@ -38,7 +38,10 @@ struct worktree **get_worktrees(void);
  */
 struct worktree **get_worktrees_without_reading_head(void);
 
-/*
+/* Construct a struct worktree from a struct repository */
+struct worktree *get_worktree_from_repository(struct repository *repo);
+
+ /*
  * Returns 1 if linked worktrees exist, 0 otherwise.
  */
 int submodule_uses_worktrees(const char *path);
