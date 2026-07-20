@@ -1066,7 +1066,7 @@ static int resolve_squash_range(struct repository *repo,
 	 * bottom commit cannot be squashed.
 	 */
 	for (i = 0; i < revs.cmdline.nr; i++)
-		if (revs.cmdline.rev[i].flags & UNINTERESTING)
+		if (revs.cmdline.rev[i].flags & BOTTOM)
 			break;
 	if (i == revs.cmdline.nr) {
 		ret = error(_("not a '<base>..<tip>' revision range"));
