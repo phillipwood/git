@@ -17,6 +17,7 @@
 #include "path.h"
 #include "read-cache.h"
 #include "refs.h"
+#include "ref-filter.h"
 #include "replay.h"
 #include "reset.h"
 #include "revision.h"
@@ -1019,16 +1020,18 @@ out:
  * but the range must have a single base and must not reach a root commit.
  */
 static int resolve_squash_range(struct repository *repo,
+				bool update_branches,
 				int argc, const char **argv,
 				struct commit **base_out,
 				struct commit **oldest_out,
-				struct commit **tip_out,
-				struct oidset *interior_out)
+				struct commit **tip_out)
 {
 	struct rev_info revs;
 	struct commit *commit, *base = NULL, *oldest = NULL, *tip = NULL;
 	size_t i;
 	int ret, tip_count = 0;
+	struct ref_filter filter = REF_FILTER_INIT;
+	struct ref_array refs = { 0 };
 
 	repo_init_revisions(repo, &revs, NULL);
 	revs.reverse = 1;
@@ -1101,8 +1104,12 @@ static int resolve_squash_range(struct repository *repo,
 			 * Allow parents that match the parents of the
 			 * squashed commit.
 			 */
-			for (q = oldest->parents; !seen && q; q = q->next)
-				seen = p->item == q->item;
+			for (q = oldest->parents; !seen && q; q = q->next) {
+				if (p->item == q->item) {
+					seen = true;
+					commit_list_insert(commit, &filter.with_commit);
+				}
+			}
 			if (!seen) {
 				ret = error(_("parent %s of commit %s is "
 					      "outside the revision range"),
@@ -1117,14 +1124,16 @@ static int resolve_squash_range(struct repository *repo,
 				o->flags &= ~SQUASH_TIP;
 			}
 		}
-		if (!oldest)
+		if (!oldest) {
+			commit_list_insert(commit, &filter.with_commit);
 			oldest = commit;
-		if (tip)
-			oidset_insert(interior_out, &tip->object.oid);
+		}
 		tip = commit;
 		tip->object.flags |= SQUASH_SEEN | SQUASH_TIP;
 		tip_count++;
 	}
+	clear_object_flags(repo, SQUASH_SEEN | SQUASH_TIP);
+	reset_revision_walk();
 	if (!tip_count) {
 		ret = error(_("the revision range is empty"));
 		goto out;
@@ -1139,6 +1148,24 @@ static int resolve_squash_range(struct repository *repo,
 	} else if (!oldest->parents) {
 		BUG("an in-range commit must have a parent");
 	}
+	commit_list_insert(tip, &filter.no_commit);
+	filter.kind = FILTER_REFS_BRANCHES;
+	if (update_branches &&
+	    filter_refs(&refs, &filter, filter.kind)) {
+		ret = error(_("could not filter refs"));
+		goto out;
+	}
+	if (refs.nr) {
+		/*
+		 * TODO: list the branches and also check HEADS from other worktrees
+		 */
+		ret = error(_("a branch points to a commit that is being squashed"));
+		advise_if_enabled(ADVICE_HISTORY_UPDATE_REFS,
+				  _("Use --update-refs=head to rewrite only "
+				    "the current branch and leave such refs "
+				    "untouched."));
+		goto out;
+	}
 	base = oldest->parents->item;
 
 	*base_out = base;
@@ -1147,9 +1174,9 @@ static int resolve_squash_range(struct repository *repo,
 	ret = 0;
 
 out:
-	clear_object_flags(repo, SQUASH_SEEN | SQUASH_TIP);
-	reset_revision_walk();
 	release_revisions(&revs);
+	ref_filter_clear(&filter);
+	ref_array_clear(&refs);
 	return ret;
 }
 
@@ -1263,23 +1290,6 @@ out:
 	return ret;
 }
 
-struct interior_ref_cb {
-	const struct oidset *interior;
-	const char *name;
-};
-
-static int find_interior_ref(const struct reference *ref, void *cb_data)
-{
-	struct interior_ref_cb *data = cb_data;
-
-	if (oidset_contains(data->interior, ref->oid)) {
-		data->name = xstrdup(ref->name);
-		return 1;
-	}
-
-	return 0;
-}
-
 static int cmd_history_squash(int argc,
 			      const char **argv,
 			      const char *prefix,
@@ -1305,7 +1315,6 @@ static int cmd_history_squash(int argc,
 	};
 	struct strbuf reflog_msg = STRBUF_INIT;
 	struct strbuf message = STRBUF_INIT;
-	struct oidset interior = OIDSET_INIT;
 	struct commit *base, *oldest, *tip, *rewritten, *msg_source,
 		*amend_source;
 	const struct object_id *base_tree_oid, *tip_tree_oid;
@@ -1328,8 +1337,8 @@ static int cmd_history_squash(int argc,
 	strbuf_addstr(&reflog_msg, "squash: updating ");
 	strbuf_join_argv(&reflog_msg, argc - 1, argv + 1, ' ');
 
-	ret = resolve_squash_range(repo, argc, argv, &base, &oldest, &tip,
-				   &interior);
+	ret = resolve_squash_range(repo, action == REF_ACTION_BRANCHES,
+				   argc, argv, &base, &oldest, &tip);
 	if (ret < 0)
 		goto out;
 
@@ -1347,23 +1356,6 @@ static int cmd_history_squash(int argc,
 		strbuf_addstr(&message, body);
 		message_template = message.buf;
 		repo_unuse_commit_buffer(repo, amend_source, amend_message);
-	}
-
-	if (action == REF_ACTION_BRANCHES) {
-		struct interior_ref_cb cb = { .interior = &interior };
-
-		refs_for_each_ref(get_main_ref_store(repo),
-				  find_interior_ref, &cb);
-		if (cb.name) {
-			ret = error(_("'%s' points into the squashed range"),
-				    cb.name);
-			advise_if_enabled(ADVICE_HISTORY_UPDATE_REFS,
-					  _("Use --update-refs=head to rewrite only "
-					    "the current branch and leave such refs "
-					    "untouched."));
-			free((char *)cb.name);
-			goto out;
-		}
 	}
 
 	ret = setup_revwalk(repo, action, tip, &revs);
@@ -1395,7 +1387,6 @@ static int cmd_history_squash(int argc,
 out:
 	strbuf_release(&reflog_msg);
 	strbuf_release(&message);
-	oidset_clear(&interior);
 	commit_list_free(parents);
 	release_revisions(&revs);
 	return ret;

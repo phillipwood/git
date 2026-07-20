@@ -305,17 +305,36 @@ test_expect_success '--update-refs=head only moves HEAD' '
 	test_cmp_rev "$other_before" other
 '
 
-test_expect_success 'refuses to fold a range a ref points into' '
-	git reset --hard three &&
-	git branch -f mid HEAD~1 &&
-	head_before=$(git rev-parse HEAD) &&
+test_expect_success 'refuses to fold a range a branch points into' '
+	test_when_finished \
+		"git switch -f $GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME; \
+		 git branch -D feature" &&
+	git checkout -f -b feature start &&
+	test_commit C1 &&
+	test_commit C2 &&
+	git checkout -b topic-1 start &&
+	test_commit C3 &&
+	test_commit C4 &&
+	git checkout C3 &&
+	test_commit C5 &&
+	git checkout feature &&
+	git merge C5 &&
+	test_commit C6 &&
+	git checkout -b topic-2 C2 &&
+	test_commit C7 &&
+	git checkout feature &&
 
 	test_must_fail git history squash start.. 2>err &&
-	test_grep "error: .* points into the squashed range" err &&
-	test_grep "hint: .*--update-refs=head" err &&
-	test_cmp_rev "$head_before" HEAD &&
+	# TODO: check the branch names when we print them (topic-1 & topic-2)
+	test_grep "^error: a branch points to" err &&
+	test_grep "^hint: .* --update-refs=head" err &&
+	test_cmp_rev C6 HEAD &&
 
-	git branch -D mid
+	# squash succeeds with --update-refs=head
+	git history squash --update-refs=head start.. &&
+	test_cmp_rev start HEAD^ &&
+	test_cmp_rev C6^{tree} HEAD^{tree} &&
+	test_cmp_rev C6 HEAD@{1}
 '
 
 test_expect_success 'advice.historyUpdateRefs silences the hint' '
@@ -325,37 +344,11 @@ test_expect_success 'advice.historyUpdateRefs silences the hint' '
 
 	test_must_fail git -c advice.historyUpdateRefs=false \
 		history squash start.. 2>err &&
-	test_grep "points into the squashed range" err &&
+	test_grep "^error: a branch points to" err &&
 	test_grep ! "hint:" err &&
 	test_cmp_rev "$head_before" HEAD &&
 
 	git branch -D mid
-'
-
-test_expect_success '--update-refs=head folds past a ref pointing into the range' '
-	git reset --hard three &&
-	git branch -f mid HEAD~1 &&
-	mid_before=$(git rev-parse mid) &&
-
-	git history squash --update-refs=head start.. &&
-
-	check_commit_count start..HEAD 1 &&
-	test_cmp_rev "$mid_before" mid &&
-
-	git branch -D mid
-'
-
-test_expect_success 'refuses to fold a range a tag points into' '
-	git reset --hard three &&
-	git tag -f mark HEAD~1 &&
-	head_before=$(git rev-parse HEAD) &&
-
-	test_must_fail git history squash start.. 2>err &&
-	test_grep "refs/tags/mark" err &&
-	test_grep "points into the squashed range" err &&
-	test_cmp_rev "$head_before" HEAD &&
-
-	git tag -d mark
 '
 
 test_expect_success 'squashes a range whose internal merge has a single base' '
@@ -582,8 +575,8 @@ test_expect_success 'refuses to fold a range a ref points into at a merge' '
 	head_before=$(git rev-parse HEAD) &&
 
 	test_must_fail git history squash start.. 2>err &&
-	test_grep "at-merge" err &&
-	test_grep "points into the squashed range" err &&
+	# TODO: test for branch nome "at-merge"
+	test_grep "a branch points to a commit" err &&
 	test_cmp_rev "$head_before" HEAD &&
 
 	git branch -D at-merge
