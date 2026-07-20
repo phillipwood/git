@@ -1015,7 +1015,7 @@ out:
  * but the range must have a single base and must not reach a root commit.
  */
 static int resolve_squash_range(struct repository *repo,
-				const char **argv,
+				int argc, const char **argv,
 				struct commit **base_out,
 				struct commit **oldest_out,
 				struct commit **tip_out,
@@ -1024,7 +1024,6 @@ static int resolve_squash_range(struct repository *repo,
 	struct rev_info revs;
 	struct commit *commit, *base = NULL, *oldest = NULL, *tip = NULL;
 	struct commit_list *boundaries = NULL, *b;
-	struct strvec args = STRVEC_INIT;
 	size_t i;
 	int ret;
 
@@ -1034,19 +1033,21 @@ static int resolve_squash_range(struct repository *repo,
 	revs.sort_order = REV_SORT_IN_GRAPH_ORDER;
 	revs.simplify_history = 0;
 	revs.boundary = 1;
+	revs.ancestry_path = 1;
+	revs.limited = 1;
+	revs.ancestry_path_implicit_bottoms = 1;
 
-	strvec_push(&args, "ignored");
-	strvec_push(&args, "--ancestry-path");
-	strvec_pushv(&args, argv);
-	setup_revisions_from_strvec(&args, &revs, NULL);
-	if (args.nr != 1) {
-		ret = error(_("unrecognized argument: %s"), args.v[1]);
+	argc = setup_revisions(argc, argv, &revs, NULL);
+	if (argc > 1) {
+		ret = error(_("unrecognized argument: %s"), argv[1]);
 		goto out;
 	}
 
 	if (revs.reverse != 1 || revs.topo_order != 1 ||
 	    revs.sort_order != REV_SORT_IN_GRAPH_ORDER ||
-	    revs.simplify_history != 0 || revs.boundary != 1) {
+	    revs.simplify_history != 0 || revs.boundary != 1 ||
+	    revs.ancestry_path != 1 || revs.limited != 1 ||
+	    revs.ancestry_path_implicit_bottoms != 1) {
 		warning(_("ignoring rev-list options that would change how the "
 			  "range is walked"));
 		revs.reverse = 1;
@@ -1054,6 +1055,9 @@ static int resolve_squash_range(struct repository *repo,
 		revs.sort_order = REV_SORT_IN_GRAPH_ORDER;
 		revs.simplify_history = 0;
 		revs.boundary = 1;
+		revs.ancestry_path = 1;
+		revs.limited = 1;
+		revs.ancestry_path_implicit_bottoms = 1;
 	}
 
 	/*
@@ -1124,7 +1128,6 @@ out:
 	commit_list_free(boundaries);
 	reset_revision_walk();
 	release_revisions(&revs);
-	strvec_clear(&args);
 	return ret;
 }
 
@@ -1290,8 +1293,8 @@ static int cmd_history_squash(int argc,
 	int ret;
 
 	argc = parse_options(argc, argv, prefix, options, usage,
-			     PARSE_OPT_KEEP_UNKNOWN_OPT);
-	if (!argc) {
+			     PARSE_OPT_KEEP_UNKNOWN_OPT | PARSE_OPT_KEEP_ARGV0);
+	if (argc < 2) {
 		ret = error(_("command expects a revision range"));
 		goto out;
 	}
@@ -1300,7 +1303,10 @@ static int cmd_history_squash(int argc,
 	if (action == REF_ACTION_DEFAULT)
 		action = REF_ACTION_BRANCHES;
 
-	ret = resolve_squash_range(repo, argv, &base, &oldest, &tip,
+	strbuf_addstr(&reflog_msg, "squash: updating ");
+	strbuf_join_argv(&reflog_msg, argc - 1, argv + 1, ' ');
+
+	ret = resolve_squash_range(repo, argc, argv, &base, &oldest, &tip,
 				   &interior);
 	if (ret < 0)
 		goto out;
@@ -1353,9 +1359,6 @@ static int cmd_history_squash(int argc,
 		ret = error(_("failed writing squashed commit"));
 		goto out;
 	}
-
-	strbuf_addstr(&reflog_msg, "squash: updating ");
-	strbuf_join_argv(&reflog_msg, argc, argv, ' ');
 
 	ret = handle_reference_updates(&revs, action, tip, rewritten,
 				       reflog_msg.buf, dry_run,
