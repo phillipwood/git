@@ -32,11 +32,22 @@ check_log_messages () {
 	test_cmp expect actual
 }
 
+# Checks that the author data of two commits matches
+# Usage: check_commit_author <rev1> <rev2>
+check_commit_author () {
+	git show -s --format="%an <%ae> %ad" "$1" >expect &&
+	git show -s --format="%an <%ae> %ad" "$1" >actual &&
+	test_cmp expect actual
+}
+
 test_expect_success 'setup linear history touching two files' '
 	test_commit base file a start &&
-	test_commit --no-tag one other x &&
-	test_commit --no-tag two file c &&
-	test_commit three file d
+	GIT_AUTHOR_NAME=One GIT_AUTHOR_EMAIL=one@example.com \
+		test_commit one other x &&
+	GIT_AUTHOR_NAME=Two GIT_AUTHOR_EMAIL=two@example.com \
+		test_commit two file c &&
+	GIT_AUTHOR_NAME=Three GIT_AUTHOR_EMAIL=three@example.com \
+		test_commit three file d
 '
 
 test_expect_success 'errors on missing range argument' '
@@ -192,106 +203,150 @@ test_expect_success 'squashes when the base is the root commit' '
 	test "$tip_tree" = "$(git rev-parse HEAD^{tree})"
 '
 
+test_expect_success 'squashing a mix of fixups' '
+	git reset --hard three &&
+	echo fix >file &&
+	git commit --fixup=two -a &&
+	echo really fix >file &&
+	git commit --fixup=one -a &&
+	echo really really fix >file &&
+	git commit --fixup=HEAD~1 -a && # fixup! two
+	echo really really really fix >file &&
+	git commit --fixup=HEAD~1 -a && # fixup! one
 
-test_expect_success 'folds fixups whose target is in the range' '
-	git reset --hard start &&
-	test_commit --no-tag target file b &&
-	git commit --allow-empty -m "fixup! target" &&
-	git commit --allow-empty -m "fixup! target" &&
-	test_commit --no-tag later file c &&
+	# squashing fixup! with a target that is not being squashed fails
+	test_must_fail git history squash one.. 2>err &&
+	test_grep "^error: cannot squash .* (fixup! one): its target is not being squashed" err &&
 
+	# squashing fixup! into fixup! with a different target fails
+	test_must_fail git history squash HEAD~4.. 2>err && # HEAD~4 is fixup! two
+	test_grep "^error: cannot squash .* (fixup! one): its target is not being squashed" err &&
+
+	# squashing a sequence of fixup! commits into their targets
+	git history squash start..HEAD~1 &&
+	test_cmp_rev start HEAD~2 &&
+	check_commit_author one HEAD~1 &&
+	test_commit_message HEAD~1 -m one &&
+
+	# squashing "fixup! fixup! <target>" into "<target>"
 	git history squash start.. &&
+	test_cmp_rev start HEAD~1 &&
+	check_commit_author one HEAD &&
+	test_commit_message HEAD -m one
+'
 
-	check_commit_count start..HEAD 1 &&
-	check_log_subjects -1 <<-\EOF
-	target
+test_expect_success 'squashing "squash!" messages' '
+	git reset --hard two &&
+	echo fix >file &&
+	git commit --fixup=HEAD -a &&
+	echo better fix >file &&
+	git commit -a -F - <<-EOF &&
+	squash! $(git rev-parse two)
+
+	Append this
 	EOF
-'
 
-test_expect_success 'refuses a below-range fixup! after an in-range commit' '
-	git reset --hard start &&
-	test_commit --no-tag inside file b &&
-	test_commit --no-tag "fixup! outside" file c &&
-	head_before=$(git rev-parse HEAD) &&
+	echo an even better fix >file &&
+	git commit -a -F - <<-EOF &&
+	squash! squash! two
 
-	test_must_fail git history squash start.. 2>err &&
-	test_grep "target is not in the range" err &&
-	test_cmp_rev "$head_before" HEAD
-'
-
-test_expect_success 'combines a run of fixups for one commit below the range' '
-	git reset --hard start &&
-	stage_file b && git commit -m "fixup! base" &&
-	stage_file c && git commit -m "fixup! base" &&
-
-	git history squash start.. &&
-
-	check_commit_count start..HEAD 1 &&
-	check_log_subjects -1 <<-\EOF
-	fixup! base
+	Append this as well
 	EOF
-'
 
-test_expect_success 'combining below-range fixups keeps the last amend! message' '
-	git reset --hard start &&
-	stage_file b && git commit -m "fixup! base" &&
-	stage_file c &&
-	commit_with_message "amend! base\n\namended body\n" &&
+	# must edit when squashing "squash!" into its target
+	test_must_fail git history squash two^.. 2>err &&
+	test_grep "^error: squashing .* (squash! [a-f0-9]*) would discard its message" err &&
 
-	git history squash start.. &&
+	# squashing "squash!" into "fixup!" appends messages and changes
+	# subject prefix
+	git history squash two.. &&
+	test_cmp_rev HEAD^ two &&
+	test_commit_message HEAD <<-\EOF &&
+	squash! two
 
-	check_commit_count start..HEAD 1 &&
-	check_log_messages -1 <<-\EOF
-	amend! base
+	Append this
 
-	amended body
-
+	Append this as well
 	EOF
-'
+	check_commit_author two HEAD &&
 
-test_expect_success 'refuses fixups for two different commits below the range' '
-	git reset --hard start &&
-	stage_file b && git commit -m "fixup! aaa" &&
-	stage_file c && git commit -m "fixup! bbb" &&
-	head_before=$(git rev-parse HEAD) &&
+	git commit --allow-empty -F - <<-\EOF &&
+	amend! two
 
-	test_must_fail git history squash start.. 2>err &&
-	test_grep "target is not in the range" err &&
-	test_cmp_rev "$head_before" HEAD
-'
-
-test_expect_success 'the last amend! for the oldest commit replaces its message' '
-	git reset --hard start &&
-	test_commit --no-tag marker-oldest file b &&
-	git commit --allow-empty -m "squash! marker-oldest" &&
-	commit_with_message "amend! marker-oldest\n\nearlier message\n" &&
-	commit_with_message \
-		"amend! marker-oldest\n\namended subject\n\namended body\n" &&
-	test_commit --no-tag marker-later file c &&
-	commit_with_message "amend! marker-later\n\nwrong message\n" &&
-
-	git history squash start.. &&
-
-	check_commit_count start..HEAD 1 &&
-	check_log_messages -1 <<-\EOF
-	amended subject
-
-	amended body
-
+	A new message
 	EOF
+
+	# "amend!" does not replace "squash!"
+	test_must_fail git history squash HEAD~2.. 2>err &&
+	test_grep "^error: squashing .* (amend! two) would overwrite .squash!. message" err
 '
 
-test_expect_success 'preserves authorship of the oldest commit' '
-	git reset --hard start &&
-	GIT_AUTHOR_NAME=Squasher GIT_AUTHOR_EMAIL=squash@example.com \
-		test_commit --no-tag oldest file b &&
-	test_commit newest file c &&
+test_expect_success 'squash commit uses last "amend!" message' '
+	git reset --hard three &&
+	echo fix >file &&
+	git commit --author="Fix Me <fix.me@example.com>" --fixup=HEAD -a &&
+	git commit --allow-empty -F - <<-EOF &&
+	amend! $(git rev-parse --short HEAD)
 
-	git history squash start.. &&
+	The first reword
 
-	git log -1 --format="%an <%ae>" >actual &&
-	echo "Squasher <squash@example.com>" >expect &&
-	test_cmp expect actual
+	More detail
+	EOF
+
+	git commit --allow-empty -F - <<-\EOF &&
+	amend! three
+
+	The second reword
+
+	Extra detail
+	EOF
+
+	test_commit WIP &&
+
+	cat >msg <<-EOF &&
+	amend! $(git rev-parse HEAD^ | tr a-f A-F)
+
+	The third reword
+
+	Excruciating detail
+	EOF
+
+	git commit --author="Someone Else <s.else@example.com>" --allow-empty \
+		-F msg &&
+
+	# squashing amend! updates the commit message
+	git history squash three^.. &&
+	sed -e 1,2d msg | test_commit_message HEAD &&
+	check_commit_author three HEAD &&
+	test_cmp_rev HEAD^ three^ &&
+
+	# squashing amend! into fixup! updates subject prefix
+	git reset --hard HEAD@{1} &&
+	git history squash three.. &&
+	sed "1s/.*/amend! three/" msg | test_commit_message HEAD &&
+	check_commit_author HEAD@{1}~4 HEAD &&
+	test_cmp_rev HEAD^ three &&
+
+	# squashing amend! into amend! keeps original subject line
+	git reset --hard HEAD@{1} &&
+	git history squash HEAD~3.. &&
+	sed "1s/.*/amend! three/" msg | test_commit_message HEAD &&
+	test_cmp_rev HEAD~3 three &&
+
+	# all amend! messages must target the first commit
+	git reset --hard HEAD@{1} &&
+	git commit --allow-empty -F - <<-\EOF &&
+	amend! WIP
+
+	The real message
+	EOF
+
+	test_must_fail git history squash HEAD~4.. 2>err &&
+	test_grep "^error: cannot squash .* that does not target" err &&
+
+	# amend! message that targets commit that is not in range is rejected
+	test_must_fail git history squash HEAD~3.. 2>err &&
+	test_grep "^error: cannot squash .* target is not being squashed" err
 '
 
 test_expect_success '--update-refs=head only moves HEAD' '

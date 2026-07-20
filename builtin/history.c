@@ -1011,6 +1011,260 @@ out:
 /*Remember to update object flag allocation in object.h */
 #define SQUASH_SEEN (1u << 11)
 #define SQUASH_TIP (1u << 12)
+#define SQUASH_AMEND_TARGET (1u << 13)
+
+static bool is_autosquash_subject(const char *s)
+{
+	return starts_with(s, "amend!") || starts_with(s, "fixup!") ||
+		starts_with(s, "squash!");
+}
+
+static bool skip_one_autosquash_prefix(const char *s, const char **out)
+{
+	if (skip_prefix(s, "amend!", out) || skip_prefix(s, "fixup!", out) ||
+	    skip_prefix(s, "squash!", out)) {
+		while (**out == ' ')
+			(*out)++;
+		return true;
+	}
+	return false;
+}
+
+static void truncate_message_to_subject(struct strbuf *msg)
+{
+	const char *eos = strstr(msg->buf, "\n\n");
+
+	if (eos)
+		strbuf_setlen(msg, eos - msg->buf + 1);
+}
+
+struct subject_data {
+	struct strintmap subjects;
+	struct strbuf subject;
+	struct strbuf squash_message;
+	const char *message;
+	bool edit_message;
+};
+
+#define SUBJECT_DATA_INIT {		\
+	.subjects = STRINTMAP_INIT,	\
+	.subject = STRBUF_INIT,		\
+	.squash_message = STRBUF_INIT,	\
+}
+
+static void subject_data_clear(struct subject_data *data)
+{
+	strintmap_clear(&data->subjects);
+	strbuf_release(&data->subject);
+	strbuf_release(&data->squash_message);
+}
+
+static int squash_amend_message(struct repository *repo,
+				struct commit *commit,
+				struct subject_data *data,
+				unsigned flags)
+{
+	const char *body = data->message + data->subject.len;
+
+	while (isspace(*body))
+		body++;
+
+	if (!*body) {
+		warning(_("ignoring %s (%s): message body is empty"),
+			repo_find_unique_abbrev(repo, &commit->object.oid,
+						DEFAULT_ABBREV),
+			data->subject.buf);
+		return 0;
+	}
+
+	if (data->edit_message) {
+		BUG("Editing is not implemented yet");
+	} else if (flags & SQUASH_AMEND_TARGET) {
+		if (starts_with(data->squash_message.buf, "squash!"))
+			return error(_("squashing %s (%s) would overwrite "
+				       "'squash!' message, please combine them "
+				       "using '--reedit-message'"),
+				     repo_find_unique_abbrev(repo,
+							     &commit->object.oid,
+							     DEFAULT_ABBREV),
+				     data->subject.buf);
+		if (starts_with(data->squash_message.buf, "fixup!"))
+			strbuf_splice(&data->squash_message, 0, 5, "amend!", 5);
+		if (starts_with(data->squash_message.buf, "amend!")) {
+			truncate_message_to_subject(&data->squash_message);
+			strbuf_addch(&data->squash_message, '\n');
+		} else {
+			strbuf_reset(&data->squash_message);
+		}
+		strbuf_addstr(&data->squash_message, body);
+		strbuf_complete_line(&data->squash_message);
+	} else {
+		return error(_("cannot squash %s (%s) that does not target "
+			       "base commit without '--reedit-message'"),
+			     repo_find_unique_abbrev(repo, &commit->object.oid,
+						     DEFAULT_ABBREV),
+			     data->subject.buf);
+	}
+	return 0;
+}
+
+static int squash_squash_message(struct repository *repo,
+				struct commit *commit,
+				struct subject_data *data,
+				unsigned flags)
+{
+	const char *body = data->message + data->subject.len;
+
+	while (isspace(*body))
+		body++;
+
+	if (data->edit_message) {
+		BUG("Editing is not implemented yet");
+	} else if (flags & SQUASH_AMEND_TARGET) {
+		if (starts_with(data->squash_message.buf, "fixup!")) {
+			truncate_message_to_subject(&data->squash_message);
+			strbuf_splice(&data->squash_message, 0, 5, "squash", 6);
+		}
+		if (starts_with(data->squash_message.buf, "squash!")) {
+			strbuf_addch(&data->squash_message, '\n');
+			strbuf_addstr(&data->squash_message, body);
+			strbuf_complete_line(&data->squash_message);
+		} else {
+			return error(_("squashing %s (%s) would discard its "
+				       "message, please combine them using "
+				       "'--reedit-message'"),
+				     repo_find_unique_abbrev(repo,
+							     &commit->object.oid,
+							     DEFAULT_ABBREV),
+				     data->subject.buf);
+		}
+	} else {
+		return error(_("cannot squash %s (%s) that does not target "
+			       "base commit without '--reedit-message'"),
+			      repo_find_unique_abbrev(repo, &commit->object.oid,
+						      DEFAULT_ABBREV),
+			      data->subject.buf);
+	}
+	return 0;
+}
+
+static int squash_check_can_autosquash(struct repository *repo,
+				       struct commit *commit,
+				       struct subject_data *data,
+				       unsigned flags)
+{
+	commit->object.flags |= flags & SQUASH_AMEND_TARGET;
+	if (starts_with(data->subject.buf, "amend!"))
+		return squash_amend_message(repo, commit, data, flags);
+	else if (starts_with(data->subject.buf, "squash!"))
+		return squash_squash_message(repo, commit, data, flags);
+
+	return 0;
+}
+
+static int squash_check_autosquash_subject(struct repository *repo,
+					   struct commit *commit,
+					   struct subject_data *data)
+{
+	const char* s = data->subject.buf;
+	struct commit *target;
+	struct hashmap_iter iter;
+	struct strmap_entry *entry;
+	/* Try skipping autosquash prefixes one at a time to allow
+	 * squashing
+	 *     a commit
+	 *     fixup! fixup! a commit
+	 *
+	 * where we may have started with
+	 *     a commit
+	 *     fixup! a commit
+	 *     fixup! fixup! a commit
+	 *
+	 * and squashed the first fixup separately from the second
+	 */
+	while (skip_one_autosquash_prefix(s, &s)) {
+		unsigned flags = strintmap_get(&data->subjects, s);
+		if (flags)
+			return squash_check_can_autosquash(repo, commit, data, flags);
+	}
+	/*
+	 * Allow "fixup! <hex object id>", but not "fixup! HEAD^" or
+	 * "fixup! main". If the target is not being squshed check the subject
+	 * to allow "fixup! abc123" and "fixup! <subject of abc123>" to be
+	 * squashed together.
+	 */
+	target = lookup_commit_reference_by_name(s);
+	if (target && istarts_with(oid_to_hex(&target->object.oid), s)) {
+		unsigned flags =
+			target->object.flags & (SQUASH_SEEN | SQUASH_AMEND_TARGET);
+		if (!flags) {
+			const char *subject_start;
+			const char *buffer = repo_logmsg_reencode(repo, target,
+								  NULL, NULL);
+			size_t subject_len = find_commit_subject(buffer,
+								 &subject_start);
+			char *subject = xmemdupz(subject_start, subject_len);
+
+			flags = strintmap_get(&data->subjects, subject);
+			free(subject);
+			repo_unuse_commit_buffer(repo, target, buffer);
+		}
+		if (flags)
+			return squash_check_can_autosquash(repo, commit,
+							   data, flags);
+	}
+	/* Try subject prefix matches */
+	strintmap_for_each_entry(&data->subjects, &iter, entry) {
+		s = data->subject.buf;
+		while(skip_one_autosquash_prefix(s, &s)) {
+			if (starts_with(entry->key, s)) {
+				unsigned value = (intptr_t)entry->value;
+
+				return squash_check_can_autosquash(repo, commit,
+								   data, value);
+			}
+		}
+	}
+	return error(_("cannot squash %s (%s): its target is not being "
+		       "squashed"),
+		       repo_find_unique_abbrev(repo, &commit->object.oid,
+					       DEFAULT_ABBREV),
+		       data->subject.buf);
+}
+
+static int squash_check_subject(struct repository *repo,
+				struct commit *commit,
+				struct subject_data *data)
+{
+	int ret = 0;
+	const char *buf = repo_logmsg_reencode(repo, commit, NULL, NULL);
+	size_t subject_len = find_commit_subject(buf, &data->message);
+
+	strbuf_reset(&data->subject);
+	strbuf_add(&data->subject, data->message, subject_len);
+
+	if (!strintmap_get_size(&data->subjects)) {
+		const char *s;
+
+		strbuf_addstr(&data->squash_message, data->message);
+		strbuf_complete_line(&data->squash_message);
+		/*
+		 * Strip a single autosquash prefix to allow squashing
+		 *     fixup! base
+		 *     amend! base
+		 */
+		s = data->subject.buf;
+		skip_one_autosquash_prefix(s, &s);
+		strintmap_set(&data->subjects, s, SQUASH_AMEND_TARGET | SQUASH_SEEN);
+		commit->object.flags |= SQUASH_AMEND_TARGET;
+	} else if (is_autosquash_subject(data->subject.buf)) {
+		ret = squash_check_autosquash_subject(repo, commit, data);
+	} else {
+		strintmap_set(&data->subjects, data->subject.buf, SQUASH_SEEN);
+	}
+	repo_unuse_commit_buffer(repo, commit, buf);
+	return ret;
+}
 
 /*
  * Resolve a "<base>..<tip>" revision range into the base commit just outside
@@ -1024,9 +1278,11 @@ static int resolve_squash_range(struct repository *repo,
 				int argc, const char **argv,
 				struct commit **base_out,
 				struct commit **oldest_out,
-				struct commit **tip_out)
+				struct commit **tip_out,
+				char **message_out)
 {
 	struct rev_info revs;
+	struct subject_data subject_data = SUBJECT_DATA_INIT;
 	struct commit *commit, *base = NULL, *oldest = NULL, *tip = NULL;
 	size_t i;
 	int ret, tip_count = 0;
@@ -1128,11 +1384,15 @@ static int resolve_squash_range(struct repository *repo,
 			commit_list_insert(commit, &filter.with_commit);
 			oldest = commit;
 		}
+		if (squash_check_subject(repo, commit, &subject_data)) {
+			ret = -1;
+			goto out;
+		}
 		tip = commit;
 		tip->object.flags |= SQUASH_SEEN | SQUASH_TIP;
 		tip_count++;
 	}
-	clear_object_flags(repo, SQUASH_SEEN | SQUASH_TIP);
+	clear_object_flags(repo, SQUASH_SEEN | SQUASH_TIP | SQUASH_AMEND_TARGET);
 	reset_revision_walk();
 	if (!tip_count) {
 		ret = error(_("the revision range is empty"));
@@ -1171,122 +1431,14 @@ static int resolve_squash_range(struct repository *repo,
 	*base_out = base;
 	*oldest_out = oldest;
 	*tip_out = tip;
+	*message_out = strbuf_detach(&subject_data.squash_message, NULL);
 	ret = 0;
 
 out:
+	subject_data_clear(&subject_data);
 	release_revisions(&revs);
 	ref_filter_clear(&filter);
 	ref_array_clear(&refs);
-	return ret;
-}
-
-static const char *autosquash_target(const char *subject)
-{
-	const char *rest;
-
-	while (skip_prefix(subject, "fixup! ", &rest) ||
-	       skip_prefix(subject, "squash! ", &rest) ||
-	       skip_prefix(subject, "amend! ", &rest))
-		subject = rest;
-	return subject;
-}
-
-static int reject_dangling_fixups(struct repository *repo,
-				  struct commit *base,
-				  struct commit *tip,
-				  struct commit *oldest,
-				  struct commit **msg_source,
-				  struct commit **amend_source)
-{
-	struct todo_list todo = TODO_LIST_INIT;
-	struct replay_opts opts = REPLAY_OPTS_INIT;
-	struct rev_info revs;
-	struct commit *commit, *last_amend = NULL;
-	struct strvec args = STRVEC_INIT;
-	char *dangling_subject = NULL, *dangling_target = NULL;
-	bool mixed_target = false, all_fixups_one_target;
-	bool past_oldest_group = false;
-	int i, ret, nr_dangling = 0;
-
-	*msg_source = oldest;
-	*amend_source = NULL;
-
-	repo_init_revisions(repo, &revs, NULL);
-	strvec_push(&args, "ignored");
-	strvec_push(&args, "--reverse");
-	strvec_push(&args, "--topo-order");
-	strvec_pushf(&args, "%s..%s", oid_to_hex(&base->object.oid),
-		     oid_to_hex(&tip->object.oid));
-	setup_revisions_from_strvec(&args, &revs, NULL);
-
-	if (prepare_revision_walk(&revs) < 0) {
-		ret = error(_("error preparing revisions"));
-		goto out;
-	}
-	while ((commit = get_revision(&revs)))
-		strbuf_addf(&todo.buf, "pick %s\n",
-			    oid_to_hex(&commit->object.oid));
-
-	if (todo_list_parse_insn_buffer(repo, &opts, todo.buf.buf, &todo) < 0 ||
-	    todo_list_rearrange_squash(&todo) < 0) {
-		ret = error(_("could not check the range for fixups"));
-		goto out;
-	}
-
-	for (i = 0; i < todo.nr; i++) {
-		const char *message, *subject_start, *target;
-		char *subject;
-		size_t sublen;
-
-		message = repo_logmsg_reencode(repo, todo.items[i].commit,
-					       NULL, NULL);
-		sublen = find_commit_subject(message, &subject_start);
-
-		if (todo.items[i].command != TODO_PICK) {
-			if (!past_oldest_group &&
-			    starts_with(subject_start, "amend! "))
-				*amend_source = todo.items[i].commit;
-			repo_unuse_commit_buffer(repo, todo.items[i].commit, message);
-			continue;
-		}
-		if (i)
-			past_oldest_group = true;
-
-		subject = xmemdupz(subject_start, sublen);
-		target = autosquash_target(subject);
-		if (target != subject) {
-			nr_dangling++;
-			if (!dangling_target) {
-				dangling_target = xstrdup(target);
-				dangling_subject = xstrdup(subject);
-			} else if (strcmp(dangling_target, target)) {
-				mixed_target = true;
-			}
-			if (starts_with(subject, "amend! "))
-				last_amend = todo.items[i].commit;
-		}
-		free(subject);
-		repo_unuse_commit_buffer(repo, todo.items[i].commit, message);
-	}
-
-	all_fixups_one_target = nr_dangling == todo.nr && !mixed_target;
-	if (nr_dangling && !all_fixups_one_target) {
-		ret = error(_("cannot squash '%s': its target is not in the "
-			      "range"), dangling_subject);
-	} else {
-		if (last_amend)
-			*msg_source = last_amend;
-		ret = 0;
-	}
-
-out:
-	free(dangling_subject);
-	free(dangling_target);
-	todo_list_release(&todo);
-	replay_opts_release(&opts);
-	reset_revision_walk();
-	release_revisions(&revs);
-	strvec_clear(&args);
 	return ret;
 }
 
@@ -1314,11 +1466,9 @@ static int cmd_history_squash(int argc,
 		OPT_END(),
 	};
 	struct strbuf reflog_msg = STRBUF_INIT;
-	struct strbuf message = STRBUF_INIT;
-	struct commit *base, *oldest, *tip, *rewritten, *msg_source,
-		*amend_source;
+	struct commit *base, *oldest, *tip, *rewritten;
 	const struct object_id *base_tree_oid, *tip_tree_oid;
-	const char *message_template = NULL;
+	char *message_template = NULL;
 	struct commit_list *parents = NULL;
 	struct rev_info revs = { 0 };
 	int ret;
@@ -1338,25 +1488,10 @@ static int cmd_history_squash(int argc,
 	strbuf_join_argv(&reflog_msg, argc - 1, argv + 1, ' ');
 
 	ret = resolve_squash_range(repo, action == REF_ACTION_BRANCHES,
-				   argc, argv, &base, &oldest, &tip);
+				   argc, argv, &base, &oldest, &tip,
+				   &message_template);
 	if (ret < 0)
 		goto out;
-
-	ret = reject_dangling_fixups(repo, base, tip, oldest, &msg_source,
-				     &amend_source);
-	if (ret < 0)
-		goto out;
-	if (amend_source) {
-		const char *amend_message, *body;
-
-		amend_message = repo_logmsg_reencode(repo, amend_source,
-						     NULL, NULL);
-		find_commit_subject(amend_message, &body);
-		body = skip_blank_lines(body + commit_subject_length(body));
-		strbuf_addstr(&message, body);
-		message_template = message.buf;
-		repo_unuse_commit_buffer(repo, amend_source, amend_message);
-	}
 
 	ret = setup_revwalk(repo, action, tip, &revs);
 	if (ret < 0)
@@ -1366,7 +1501,7 @@ static int cmd_history_squash(int argc,
 	tip_tree_oid = &repo_get_commit_tree(repo, tip)->object.oid;
 	commit_list_append(base, &parents);
 
-	ret = commit_tree_ext(repo, "squash", msg_source, message_template,
+	ret = commit_tree_ext(repo, "squash", oldest, message_template,
 			      parents,
 			      base_tree_oid, tip_tree_oid, &rewritten, flags);
 	if (ret < 0) {
@@ -1386,9 +1521,9 @@ static int cmd_history_squash(int argc,
 
 out:
 	strbuf_release(&reflog_msg);
-	strbuf_release(&message);
 	commit_list_free(parents);
 	release_revisions(&revs);
+	free(message_template);
 	return ret;
 }
 
