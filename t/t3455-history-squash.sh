@@ -33,8 +33,7 @@ check_log_messages () {
 }
 
 test_expect_success 'setup linear history touching two files' '
-	test_commit base file a &&
-	git tag start &&
+	test_commit base file a start &&
 	test_commit --no-tag one other x &&
 	test_commit --no-tag two file c &&
 	test_commit three file d
@@ -76,6 +75,18 @@ test_expect_success 'rejects root commit' '
 	test_must_fail git history squash --ancestry-path=start $oid..three 2>err &&
 	echo "error: cannot squash down to root commit" >expect &&
 	test_cmp expect err
+'
+
+test_expect_success 'rejects multiple tips' '
+	oid=$(git commit-tree -m tip -p start^0 three^{tree}) &&
+	test_must_fail git history squash ^start $oid three~1 2>err &&
+	echo "error: the revision range contains more than one tip commit" >expect &&
+	test_cmp expect err &&
+
+	git reset --hard three &&
+	git history squash ^start three~1 three &&
+	test_cmp_rev HEAD~1 start^0 &&
+	test_cmp_rev HEAD^{tree} three^{tree}
 '
 
 test_expect_success 'accepts multiple revision arguments with an exclusion' '
@@ -404,7 +415,7 @@ test_expect_success 'refuses a merge whose other parent is outside the range' '
 	merged=$(git rev-parse HEAD) &&
 
 	test_must_fail git history squash "$base.." 2>err &&
-	test_grep "more than one base" err &&
+	test_grep "parent .* of commit .* is outside the revision range" err &&
 	test_cmp_rev "$merged" HEAD
 '
 
@@ -533,7 +544,7 @@ test_expect_success 'refuses an octopus merge with an arm forked before the base
 	git branch -D octo-pre octo-within &&
 
 	test_must_fail git history squash "$octo_base.." 2>err &&
-	test_grep "more than one base" err &&
+	test_grep "parent .* of commit .* is outside the revision range" err &&
 	test_cmp_rev "$merged" HEAD
 '
 

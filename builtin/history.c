@@ -1007,6 +1007,10 @@ out:
 	return ret;
 }
 
+/*Remember to update object flag allocation in object.h */
+#define SQUASH_SEEN (1u << 11)
+#define SQUASH_TIP (1u << 12)
+
 /*
  * Resolve a "<base>..<tip>" revision range into the base commit just outside
  * the range (which becomes the parent of the squashed commit), the oldest
@@ -1023,16 +1027,14 @@ static int resolve_squash_range(struct repository *repo,
 {
 	struct rev_info revs;
 	struct commit *commit, *base = NULL, *oldest = NULL, *tip = NULL;
-	struct commit_list *boundaries = NULL, *b;
 	size_t i;
-	int ret;
+	int ret, tip_count = 0;
 
 	repo_init_revisions(repo, &revs, NULL);
 	revs.reverse = 1;
 	revs.topo_order = 1;
 	revs.sort_order = REV_SORT_IN_GRAPH_ORDER;
 	revs.simplify_history = 0;
-	revs.boundary = 1;
 	revs.ancestry_path = 1;
 	revs.limited = 1;
 	revs.ancestry_path_implicit_bottoms = 1;
@@ -1045,7 +1047,7 @@ static int resolve_squash_range(struct repository *repo,
 
 	if (revs.reverse != 1 || revs.topo_order != 1 ||
 	    revs.sort_order != REV_SORT_IN_GRAPH_ORDER ||
-	    revs.simplify_history != 0 || revs.boundary != 1 ||
+	    revs.simplify_history != 0 || revs.boundary == 1 ||
 	    revs.ancestry_path != 1 || revs.limited != 1 ||
 	    revs.ancestry_path_implicit_bottoms != 1) {
 		warning(_("ignoring rev-list options that would change how the "
@@ -1054,7 +1056,7 @@ static int resolve_squash_range(struct repository *repo,
 		revs.topo_order = 1;
 		revs.sort_order = REV_SORT_IN_GRAPH_ORDER;
 		revs.simplify_history = 0;
-		revs.boundary = 1;
+		revs.boundary = 0;
 		revs.ancestry_path = 1;
 		revs.limited = 1;
 		revs.ancestry_path_implicit_bottoms = 1;
@@ -1077,32 +1079,60 @@ static int resolve_squash_range(struct repository *repo,
 		ret = error(_("error preparing revisions"));
 		goto out;
 	}
-
-	/*
-	 * Set boundary commits aside for the base check below, and put every
-	 * in-range commit but the tip into the interior set. A ref pointing
-	 * at an interior commit would dangle once the range is folded away.
-	 */
 	while ((commit = get_revision(&revs))) {
-		if (commit->object.flags & BOUNDARY) {
-			commit_list_insert(commit, &boundaries);
-			continue;
-		}
+		struct commit_list *p;
+
 		if (!commit->parents) {
 			ret = error(_("cannot squash down to root commit"));
 			goto out;
+		}
+		for (p = commit->parents; oldest && p; p = p->next) {
+			struct commit_list *q;
+			struct object *o;
+			bool seen;
+
+			if (repo_parse_commit(repo, p->item)) {
+				ret = error(_("cannot parse commit"));
+				goto out;
+			}
+			o = &p->item->object;
+			seen = o->flags & SQUASH_SEEN;
+			/*
+			 * Allow parents that match the parents of the
+			 * squashed commit.
+			 */
+			for (q = oldest->parents; !seen && q; q = q->next)
+				seen = p->item == q->item;
+			if (!seen) {
+				ret = error(_("parent %s of commit %s is "
+					      "outside the revision range"),
+					    repo_find_unique_abbrev(repo, &o->oid,
+								    DEFAULT_ABBREV),
+					    repo_find_unique_abbrev(repo, &commit->object.oid,
+								    DEFAULT_ABBREV));
+				goto out;
+			}
+			if (o->flags & SQUASH_TIP) {
+				tip_count--;
+				o->flags &= ~SQUASH_TIP;
+			}
 		}
 		if (!oldest)
 			oldest = commit;
 		if (tip)
 			oidset_insert(interior_out, &tip->object.oid);
 		tip = commit;
+		tip->object.flags |= SQUASH_SEEN | SQUASH_TIP;
+		tip_count++;
 	}
-
-	if (!oldest) {
+	if (!tip_count) {
 		ret = error(_("the revision range is empty"));
 		goto out;
-	} else if (oldest == tip) {
+	} else if (tip_count != 1) {
+		  ret = error(_("the revision range contains more than one tip "
+				"commit"));
+		  goto out;
+	  } else if (oldest == tip) {
 		ret = error(_("the revision range holds a single commit; "
 			      "nothing to squash"));
 		goto out;
@@ -1111,25 +1141,13 @@ static int resolve_squash_range(struct repository *repo,
 	}
 	base = oldest->parents->item;
 
-	/*
-	 * A boundary other than the base is an in-range commit reaching a
-	 * commit outside the range, so the range has more than one base.
-	 */
-	for (b = boundaries; b; b = b->next) {
-		if (b->item != base) {
-			ret = error(_("the revision range has more than one base; "
-				      "cannot squash"));
-			goto out;
-		}
-	}
-
 	*base_out = base;
 	*oldest_out = oldest;
 	*tip_out = tip;
 	ret = 0;
 
 out:
-	commit_list_free(boundaries);
+	clear_object_flags(repo, SQUASH_SEEN | SQUASH_TIP);
 	reset_revision_walk();
 	release_revisions(&revs);
 	return ret;
