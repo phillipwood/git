@@ -1088,6 +1088,10 @@ static int resolve_squash_range(struct repository *repo,
 			commit_list_insert(commit, &boundaries);
 			continue;
 		}
+		if (!commit->parents) {
+			ret = error(_("cannot squash down to root commit"));
+			goto out;
+		}
 		if (!oldest)
 			oldest = commit;
 		if (tip)

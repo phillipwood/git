@@ -66,6 +66,18 @@ test_expect_success 'errors on a range holding a single commit' '
 	test_cmp_rev "$head_before" HEAD
 '
 
+test_expect_success 'rejects root commit' '
+	# create a disconnected root commit
+	oid=$(git commit-tree -m root three^{tree}) &&
+	# because we pass --ancestry-path when calling setup_revs() it the
+	# revision walk will only include commits decended from $oid so
+	# we need to give it another --ancestry-path commit to actually walk
+	# any commits.
+	test_must_fail git history squash --ancestry-path=start $oid..three 2>err &&
+	echo "error: cannot squash down to root commit" >expect &&
+	test_cmp expect err
+'
+
 test_expect_success 'accepts multiple revision arguments with an exclusion' '
 	git reset --hard three &&
 	git branch -f keep HEAD~2 &&
