@@ -349,6 +349,32 @@ test_expect_success 'squash commit uses last "amend!" message' '
 	test_grep "^error: cannot squash .* target is not being squashed" err
 '
 
+test_expect_success 'squashing fixups into a merge' '
+	test_when_finished \
+		"git switch -f $GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME; \
+		 git branch -D feature" &&
+	git checkout -f start &&
+	test_commit F1 &&
+	git checkout -b feature start &&
+	test_commit F2 &&
+	git merge F1 &&
+	echo fixed >F1.t &&
+	cat >msg <<-EOF &&
+	amend! $(git rev-parse HEAD)
+
+	merge F1 and F2
+
+	reworded
+	EOF
+
+	git commit -a -F msg &&
+	git history squash HEAD^^! HEAD &&
+	test_cmp_rev HEAD^1 F2 &&
+	test_cmp_rev HEAD^2 F1 &&
+	test_cmp_rev HEAD@{1}^{tree} HEAD^{tree} &&
+	sed 1,2d msg | test_commit_message HEAD
+'
+
 test_expect_success '--update-refs=head only moves HEAD' '
 	git reset --hard three &&
 	git branch -f other HEAD &&

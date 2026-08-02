@@ -1276,14 +1276,13 @@ static int squash_check_subject(struct repository *repo,
 static int resolve_squash_range(struct repository *repo,
 				bool update_branches,
 				int argc, const char **argv,
-				struct commit **base_out,
 				struct commit **oldest_out,
 				struct commit **tip_out,
 				char **message_out)
 {
 	struct rev_info revs;
 	struct subject_data subject_data = SUBJECT_DATA_INIT;
-	struct commit *commit, *base = NULL, *oldest = NULL, *tip = NULL;
+	struct commit *commit, *oldest = NULL, *tip = NULL;
 	size_t i;
 	int ret, tip_count = 0;
 	struct ref_filter filter = REF_FILTER_INIT;
@@ -1426,9 +1425,6 @@ static int resolve_squash_range(struct repository *repo,
 				    "untouched."));
 		goto out;
 	}
-	base = oldest->parents->item;
-
-	*base_out = base;
 	*oldest_out = oldest;
 	*tip_out = tip;
 	*message_out = strbuf_detach(&subject_data.squash_message, NULL);
@@ -1466,10 +1462,9 @@ static int cmd_history_squash(int argc,
 		OPT_END(),
 	};
 	struct strbuf reflog_msg = STRBUF_INIT;
-	struct commit *base, *oldest, *tip, *rewritten;
+	struct commit *oldest, *tip, *rewritten;
 	const struct object_id *base_tree_oid, *tip_tree_oid;
 	char *message_template = NULL;
-	struct commit_list *parents = NULL;
 	struct rev_info revs = { 0 };
 	int ret;
 
@@ -1488,7 +1483,7 @@ static int cmd_history_squash(int argc,
 	strbuf_join_argv(&reflog_msg, argc - 1, argv + 1, ' ');
 
 	ret = resolve_squash_range(repo, action == REF_ACTION_BRANCHES,
-				   argc, argv, &base, &oldest, &tip,
+				   argc, argv, &oldest, &tip,
 				   &message_template);
 	if (ret < 0)
 		goto out;
@@ -1497,13 +1492,13 @@ static int cmd_history_squash(int argc,
 	if (ret < 0)
 		goto out;
 
-	base_tree_oid = &repo_get_commit_tree(repo, base)->object.oid;
+	base_tree_oid = &repo_get_commit_tree(repo,
+					oldest->parents->item)->object.oid;
 	tip_tree_oid = &repo_get_commit_tree(repo, tip)->object.oid;
-	commit_list_append(base, &parents);
 
 	ret = commit_tree_ext(repo, "squash", oldest, message_template,
-			      parents,
-			      base_tree_oid, tip_tree_oid, &rewritten, flags);
+			      oldest->parents, base_tree_oid, tip_tree_oid,
+			      &rewritten, flags);
 	if (ret < 0) {
 		ret = error(_("failed writing squashed commit"));
 		goto out;
@@ -1521,7 +1516,6 @@ static int cmd_history_squash(int argc,
 
 out:
 	strbuf_release(&reflog_msg);
-	commit_list_free(parents);
 	release_revisions(&revs);
 	free(message_template);
 	return ret;
