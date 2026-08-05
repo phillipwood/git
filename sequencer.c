@@ -5198,6 +5198,8 @@ static int pick_commits(struct repository *r,
 		struct strbuf head_ref = STRBUF_INIT, buf = STRBUF_INIT;
 		struct stat st;
 
+		refs_delete_ref(get_main_ref_store(the_repository), NULL,
+				"REBASE_HEAD", NULL, REF_NO_DEREF);
 		if (read_oneliner(&head_ref, rebase_path_head_name(), 0) &&
 				starts_with(head_ref.buf, "refs/")) {
 			const char *msg;
