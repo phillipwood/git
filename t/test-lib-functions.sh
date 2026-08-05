@@ -299,7 +299,9 @@ test_ref_missing () {
 		return 0
 		;;
 	0)
-		echo >&4 "test_ref_missing: reference exists"
+		local refname
+		eval refname="\$$#"
+		echo >&4 "test_ref_missing: '$refname' exists"
 		return 1
 		;;
 	*)
