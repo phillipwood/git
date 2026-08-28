@@ -2686,16 +2686,9 @@ static enum pick_result do_pick_commit(struct repository *r,
 	 * the commit it is squashed into, which leaves that commit empty
 	 * instead, so check for that here and honor --empty for it.
 	 */
-	if ((flags & AMEND_MSG) && !drop_commit &&
+	if (is_fixup(item->command) &&
 	    ctx->fixup_target == FIXUP_TARGET_PICKED_NONEMPTY) {
-		int emptied = is_amended_head_empty(r);
-
-		if (emptied < 0) {
-			res = emptied;
-			goto leave;
-		}
-
-		if (emptied && (!final_fixup || opts->keep_redundant_commits)) {
+		if (opts->keep_redundant_commits || !final_fixup) {
 			/*
 			 * Keep the commit, empty for now, when more fixups
 			 * are still to be squashed into it, as dropping it
@@ -2703,18 +2696,25 @@ static enum pick_result do_pick_commit(struct repository *r,
 			 * instead.  Also keep it when --empty=keep asks us to.
 			 */
 			flags |= ALLOW_EMPTY;
-		} else if (emptied && opts->drop_redundant_commits) {
-			unlink(git_path_merge_msg(r));
-			refs_delete_ref(get_main_ref_store(r), "", "AUTO_MERGE",
-					NULL, REF_NO_DEREF);
-			res = drop_head_commit(r, opts,
-					       command_to_string(command));
-			if (res)
+		} else if (opts->drop_redundant_commits) {
+			int emptied = is_amended_head_empty(r);
+
+			if (emptied < 0) {
+				res = emptied;
 				goto leave;
-			drop_head = 1;
-			fprintf(stderr,
-				_("dropping %s %s -- squashing it in empties the commit\n"),
-				oid_to_hex(&commit->object.oid), msg.subject);
+			} else if (emptied) {
+				unlink(git_path_merge_msg(r));
+				refs_delete_ref(get_main_ref_store(r), "",
+						"AUTO_MERGE", NULL, REF_NO_DEREF);
+				res = drop_head_commit(r, opts,
+						       command_to_string(command));
+				if (res)
+					goto leave;
+				drop_head = 1;
+				fprintf(stderr,
+					_("dropping %s %s -- squashing it in empties the commit\n"),
+					oid_to_hex(&commit->object.oid), msg.subject);
+			}
 		}
 		/*
 		 * Otherwise --empty=stop is in effect, and "git commit
