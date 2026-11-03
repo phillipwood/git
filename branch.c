@@ -387,7 +387,7 @@ int validate_branchname(const char *name, struct strbuf *ref)
 }
 
 static int initialized_checked_out_branches;
-static struct strmap current_checked_out_branches = STRMAP_INIT;
+static struct strintmap current_checked_out_branches = STRINTMAP_INIT;
 
 enum branch_checkout_kind {
 	BRANCH_CHECKOUT_KIND_CHECKOUT,
@@ -419,7 +419,7 @@ static void register_checked_out_branch(const char *prefix, const char *name,
 	checked_out_branches[checked_out_branches_nr].kind = kind;
 	checked_out_branches_nr++;
 
-	strmap_put(&current_checked_out_branches, refname, path_copy);
+	strintmap_set(&current_checked_out_branches, refname, checked_out_branches_nr);
 }
 
 static void prepare_checked_out_branches(void)
@@ -483,21 +483,31 @@ static void prepare_checked_out_branches(void)
 	free_worktrees(worktrees);
 }
 
+static const struct checked_out_branch *get_checked_out_branch(const char *refname)
+{
+	int i = strintmap_get(&current_checked_out_branches, refname);
+
+	return i ? &checked_out_branches[i - 1] : NULL;
+}
+
 const char *branch_checked_out(const char *refname)
 {
+	const struct checked_out_branch* b;
+
 	prepare_checked_out_branches();
-	return strmap_get(&current_checked_out_branches, refname);
+	b = get_checked_out_branch(refname);
+	return b ? b->path : NULL;
 }
 
 const char *branch_bisecting(const char *refname)
 {
+	const struct checked_out_branch* b;
+
 	prepare_checked_out_branches();
-	for (size_t i = 0; i < checked_out_branches_nr; i++) {
-		if (!strcmp(refname, checked_out_branches[i].refname) &&
-		    checked_out_branches[i].kind == BRANCH_CHECKOUT_KIND_BISECT)
-			return checked_out_branches[i].path;
-	}
-	return NULL;
+	b = get_checked_out_branch(refname);
+	return b &&
+		b->kind == BRANCH_CHECKOUT_KIND_BISECT ? b->path
+						       : NULL;
 }
 
 /*
