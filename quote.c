@@ -47,26 +47,82 @@ void sq_quote_buf(struct strbuf *dst, const char *src)
 	free(to_free);
 }
 
+static bool needs_sq_quote(char c, unsigned brace)
+{
+	if (isalnum(c) || (unsigned char)c > 0x7f)
+		return false;
+
+	switch (c) {
+	case ',':
+		return brace > 0; /* Prevent brace expansion */
+	case '}':
+		return !brace; /* Quote unpaired '}' */
+	case '~':
+	case '+':
+	case '-':
+	case '.':
+	case '/':
+	case ':':
+	case '=':
+	case '@':
+	case '_':
+	case '^':
+		return false;
+	default:
+		return true;
+	}
+}
+
 void sq_quote_buf_pretty(struct strbuf *dst, const char *src)
 {
-	static const char ok_punct[] = "+,-./:=@_^";
-	const char *p;
+	const char *p = src, *q;
+	bool quote_it = false;
+	unsigned brace = 0;
 
 	/* Avoid losing a zero-length string by adding '' */
-	if (!*src) {
+	if (!*p) {
 		strbuf_addstr(dst, "''");
 		return;
 	}
 
-	for (p = src; *p; p++) {
-		if (!isalnum(*p) && !strchr(ok_punct, *p)) {
-			sq_quote_buf(dst, src);
-			return;
-		}
+	/* '~' is only special if it is the first character */
+	if (*p == '~') {
+		quote_it = true;
+		p++;
 	}
 
-	/* if we get here, we did not need quoting */
-	strbuf_addstr(dst, src);
+	for (q = p; *q; q++) {
+		if (need_bs_quote(*q)) {
+			if (brace)
+				quote_it = true;
+			if (quote_it)
+				strbuf_addch(dst, '\'');
+			strbuf_add(dst, p, q - p);
+			p = q + 1;
+			if (quote_it)
+				strbuf_addch(dst, '\'');
+			strbuf_addch(dst, '\\');
+			strbuf_addch(dst, *q);
+			if (brace)
+				strbuf_addch(dst, '\'');
+			else
+				quote_it = false;
+		} if (*q == '{') {
+			brace++;
+		} else if (*q == '}' && brace) {
+			brace--;
+		} else if (!quote_it && needs_sq_quote(*q, brace)) {
+			quote_it = 1;
+		}
+	}
+	if (brace && !quote_it)
+		/* Quote unpaired '{' */
+		quote_it = true;
+	if (quote_it)
+		strbuf_addch(dst, '\'');
+	strbuf_add(dst, p, q - p);
+	if (quote_it)
+		strbuf_addch(dst, '\'');
 }
 
 void sq_quotef(struct strbuf *dst, const char *fmt, ...)
